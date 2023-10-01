@@ -22,6 +22,8 @@ project(VCMI)
 # It's used currently to make sure that 3rd-party dependencies in git submodules get proper FOLDER property
 # - Make FindFuzzyLite check for the right version and disable FORCE_BUNDLED_FL by default
 
+add_compile_definitions(_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION)
+
 if(APPLE)
 	if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
 		set(APPLE_MACOS 1)

@@ -4,6 +4,8 @@
 /launcher/vcmilauncher_automoc.cpp
 /conan-*
 
+cmake-build-debug
+
 build/
 .cache/*
 out/
