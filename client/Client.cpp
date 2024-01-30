@@ -24,6 +24,7 @@
 #include "../CCallback.h"
 #include "../lib/CConfigHandler.h"
 #include "../lib/gameState/CGameState.h"
+#include "../lib/CPlayerState.h"
 #include "../lib/CThreadHelper.h"
 #include "../lib/VCMIDirs.h"
 #include "../lib/UnlockGuard.h"
@@ -32,7 +33,7 @@
 #include "../lib/mapping/CMapService.h"
 #include "../lib/pathfinder/CGPathNode.h"
 #include "../lib/filesystem/Filesystem.h"
-#include "../lib/registerTypes/RegisterTypes.h"
+#include "../lib/registerTypes/RegisterTypesClientPacks.h"
 #include "../lib/serializer/Connection.h"
 
 #include <memory>
@@ -137,16 +138,11 @@ CClient::CClient()
 {
 	waitingRequest.clear();
 	applier = std::make_shared<CApplier<CBaseForCLApply>>();
-	registerTypesClientPacks1(*applier);
-	registerTypesClientPacks2(*applier);
-	IObjectInterface::cb = this;
+	registerTypesClientPacks(*applier);
 	gs = nullptr;
 }
 
-CClient::~CClient()
-{
-	IObjectInterface::cb = nullptr;
-}
+CClient::~CClient() = default;
 
 const Services * CClient::services() const
 {
@@ -177,8 +173,9 @@ void CClient::newGame(CGameState * initializedGameState)
 {
 	CSH->th->update();
 	CMapService mapService;
-	gs = initializedGameState ? initializedGameState : new CGameState();
-	gs->preInit(VLC);
+	assert(initializedGameState);
+	gs = initializedGameState;
+	gs->preInit(VLC, this);
 	logNetwork->trace("\tCreating gamestate: %i", CSH->th->getDiff());
 	if(!initializedGameState)
 	{
@@ -200,7 +197,7 @@ void CClient::loadGame(CGameState * initializedGameState)
 	logNetwork->info("Game state was transferred over network, loading.");
 	gs = initializedGameState;
 
-	gs->preInit(VLC);
+	gs->preInit(VLC, this);
 	gs->updateOnLoad(CSH->si.get());
 	logNetwork->info("Game loaded, initialize interfaces.");
 
@@ -228,7 +225,7 @@ void CClient::loadGame(CGameState * initializedGameState)
 			throw std::runtime_error("Cannot open client part of " + CSH->si->mapname);
 
 		std::unique_ptr<CLoadFile> loader (new CLoadFile(clientSaveName));
-		serialize(loader->serializer, loader->serializer.fileVersion);
+		serialize(loader->serializer, loader->serializer.version);
 
 		logNetwork->info("Client data loaded.");
 	}
@@ -241,7 +238,7 @@ void CClient::loadGame(CGameState * initializedGameState)
 	initPlayerInterfaces();
 }
 
-void CClient::serialize(BinarySerializer & h, const int version)
+void CClient::serialize(BinarySerializer & h)
 {
 	assert(h.saving);
 	ui8 players = static_cast<ui8>(playerint.size());
@@ -254,20 +251,17 @@ void CClient::serialize(BinarySerializer & h, const int version)
 		h & i->first;
 		h & i->second->dllName;
 		h & i->second->human;
-		i->second->saveGame(h, version);
+		i->second->saveGame(h);
 	}
 
 #if SCRIPTING_ENABLED
-	if(version >= 800)
-	{
-		JsonNode scriptsState;
-		clientScripts->serializeState(h.saving, scriptsState);
-		h & scriptsState;
-	}
+	JsonNode scriptsState;
+	clientScripts->serializeState(h.saving, scriptsState);
+	h & scriptsState;
 #endif
 }
 
-void CClient::serialize(BinaryDeserializer & h, const int version)
+void CClient::serialize(BinaryDeserializer & h)
 {
 	assert(!h.saving);
 	ui8 players = 0;
@@ -323,7 +317,7 @@ void CClient::serialize(BinaryDeserializer & h, const int version)
 
 		// loadGame needs to be called after initGameInterface to load paths correctly
 		// initGameInterface is called in installNewPlayerInterface
-		nInt->loadGame(h, version);
+		nInt->loadGame(h);
 
 		if (shouldResetInterface)
 		{
@@ -367,11 +361,10 @@ void CClient::endGame()
 
 	GH.curInt = nullptr;
 	{
-		boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
 		logNetwork->info("Ending current game!");
 		removeGUI();
 
-		vstd::clear_pointer(const_cast<CGameInfo *>(CGI)->mh);
+		CGI->mh.reset();
 		vstd::clear_pointer(gs);
 
 		logNetwork->info("Deleted mapHandler and gameState.");
@@ -393,7 +386,7 @@ void CClient::initMapHandler()
 	// During loading CPlayerInterface from serialized state it's depend on MH
 	if(!settings["session"]["headless"].Bool())
 	{
-		const_cast<CGameInfo *>(CGI)->mh = new CMapHandler(gs->map);
+		CGI->mh = std::make_shared<CMapHandler>(gs->map);
 		logNetwork->trace("Creating mapHandler: %d ms", CSH->th->getDiff());
 	}
 
@@ -415,7 +408,7 @@ void CClient::initPlayerEnvironments()
 			hasHumanPlayer = true;
 	}
 
-	if(!hasHumanPlayer)
+	if(!hasHumanPlayer && !settings["session"]["headless"].Bool())
 	{
 		Settings session = settings.write["session"];
 		session["spectate"].Bool() = true;
@@ -440,7 +433,7 @@ void CClient::initPlayerInterfaces()
 		if(!vstd::contains(playerint, color))
 		{
 			logNetwork->info("Preparing interface for player %s", color.toString());
-			if(playerInfo.second.isControlledByAI())
+			if(playerInfo.second.isControlledByAI() || settings["session"]["onlyai"].Bool())
 			{
 				bool alliedToHuman = false;
 				for(auto & allyInfo : gs->scenarioOps->playerInfos)
@@ -499,8 +492,6 @@ std::string CClient::aiNameForPlayer(bool battleAI, bool alliedToHuman)
 
 void CClient::installNewPlayerInterface(std::shared_ptr<CGameInterface> gameInterface, PlayerColor color, bool battlecb)
 {
-	boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-
 	playerint[color] = gameInterface;
 
 	logGlobal->trace("\tInitializing the interface for player %s", color.toString());
@@ -513,8 +504,6 @@ void CClient::installNewPlayerInterface(std::shared_ptr<CGameInterface> gameInte
 
 void CClient::installNewBattleInterface(std::shared_ptr<CBattleGameInterface> battleInterface, PlayerColor color, bool needCallback)
 {
-	boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-
 	battleints[color] = battleInterface;
 
 	if(needCallback)
@@ -528,20 +517,20 @@ void CClient::installNewBattleInterface(std::shared_ptr<CBattleGameInterface> ba
 
 void CClient::handlePack(CPack * pack)
 {
-	CBaseForCLApply * apply = applier->getApplier(typeList.getTypeID(pack)); //find the applier
+	CBaseForCLApply * apply = applier->getApplier(CTypeList::getInstance().getTypeID(pack)); //find the applier
 	if(apply)
 	{
-		boost::unique_lock<boost::recursive_mutex> guiLock(*CPlayerInterface::pim);
+		boost::mutex::scoped_lock interfaceLock(GH.interfaceMutex);
 		apply->applyOnClBefore(this, pack);
-		logNetwork->trace("\tMade first apply on cl: %s", typeList.getTypeInfo(pack)->name());
+		logNetwork->trace("\tMade first apply on cl: %s", typeid(pack).name());
 		gs->apply(pack);
-		logNetwork->trace("\tApplied on gs: %s", typeList.getTypeInfo(pack)->name());
+		logNetwork->trace("\tApplied on gs: %s", typeid(pack).name());
 		apply->applyOnClAfter(this, pack);
-		logNetwork->trace("\tMade second apply on cl: %s", typeList.getTypeInfo(pack)->name());
+		logNetwork->trace("\tMade second apply on cl: %s", typeid(pack).name());
 	}
 	else
 	{
-		logNetwork->error("Message %s cannot be applied, cannot find applier!", typeList.getTypeInfo(pack)->name());
+		logNetwork->error("Message %s cannot be applied, cannot find applier!", typeid(pack).name());
 	}
 	delete pack;
 }
@@ -565,17 +554,16 @@ int CClient::sendRequest(const CPackForServer * request, PlayerColor player)
 
 void CClient::battleStarted(const BattleInfo * info)
 {
+	std::shared_ptr<CPlayerInterface> att;
+	std::shared_ptr<CPlayerInterface> def;
+	auto & leftSide = info->sides[0];
+	auto & rightSide = info->sides[1];
+
 	for(auto & battleCb : battleCallbacks)
 	{
-		if(vstd::contains_if(info->sides, [&](const SideInBattle& side) {return side.color == battleCb.first; })
-			|| !battleCb.first.isValidPlayer())
-		{
+		if(!battleCb.first.isValidPlayer() || battleCb.first == leftSide.color || battleCb.first == rightSide.color)
 			battleCb.second->onBattleStarted(info);
-		}
 	}
-
-	std::shared_ptr<CPlayerInterface> att, def;
-	auto & leftSide = info->sides[0], & rightSide = info->sides[1];
 
 	//If quick combat is not, do not prepare interfaces for battleint
 	auto callBattleStart = [&](PlayerColor color, ui8 side)
@@ -597,14 +585,26 @@ void CClient::battleStarted(const BattleInfo * info)
 		def = std::dynamic_pointer_cast<CPlayerInterface>(playerint[rightSide.color]);
 	
 	//Remove player interfaces for auto battle (quickCombat option)
-	if(att && att->isAutoFightOn)
+	if((att && att->isAutoFightOn) || (def && def->isAutoFightOn))
 	{
-		if (att->cb->getBattle(info->battleID)->battleGetTacticDist())
+		auto endTacticPhaseIfEligible = [info](const CPlayerInterface * interface)
 		{
-			auto side = att->cb->getBattle(info->battleID)->playerToSide(att->playerID);
-			auto action = BattleAction::makeEndOFTacticPhase(*side);
-			att->cb->battleMakeTacticAction(info->battleID, action);
-		}
+			if (interface->cb->getBattle(info->battleID)->battleGetTacticDist())
+			{
+				auto side = interface->cb->getBattle(info->battleID)->playerToSide(interface->playerID);
+
+				if(interface->playerID == info->sides[info->tacticsSide].color)
+				{
+					auto action = BattleAction::makeEndOFTacticPhase(*side);
+					interface->cb->battleMakeTacticAction(info->battleID, action);
+				}
+			}
+		};
+
+		if(att && att->isAutoFightOn)
+			endTacticPhaseIfEligible(att.get());
+		else // def && def->isAutoFightOn
+			endTacticPhaseIfEligible(def.get());
 
 		att.reset();
 		def.reset();
@@ -614,7 +614,6 @@ void CClient::battleStarted(const BattleInfo * info)
 	{
 		if(att || def)
 		{
-			boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
 			CPlayerInterface::battleInt = std::make_shared<BattleInterface>(info->getBattleID(), leftSide.armyObject, rightSide.armyObject, leftSide.hero, rightSide.hero, att, def);
 		}
 		else if(settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
@@ -622,7 +621,6 @@ void CClient::battleStarted(const BattleInfo * info)
 			//TODO: This certainly need improvement
 			auto spectratorInt = std::dynamic_pointer_cast<CPlayerInterface>(playerint[PlayerColor::SPECTATOR]);
 			spectratorInt->cb->onBattleStarted(info);
-			boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
 			CPlayerInterface::battleInt = std::make_shared<BattleInterface>(info->getBattleID(), leftSide.armyObject, rightSide.armyObject, leftSide.hero, rightSide.hero, att, def, spectratorInt);
 		}
 	}
@@ -648,15 +646,20 @@ void CClient::battleFinished(const BattleID & battleID)
 
 void CClient::startPlayerBattleAction(const BattleID & battleID, PlayerColor color)
 {
-	assert(vstd::contains(battleints, color));
+	if (battleints.count(color) == 0)
+		return; // not our combat in MP
 
-	if(vstd::contains(battleints, color))
+	auto battleint = battleints.at(color);
+
+	if (!battleint->human)
 	{
 		// we want to avoid locking gamestate and causing UI to freeze while AI is making turn
-		auto unlock = vstd::makeUnlockGuardIf(*CPlayerInterface::pim, !battleints[color]->human);
-
-		assert(vstd::contains(battleints, color));
-		battleints[color]->activeStack(battleID, gs->getBattle(battleID)->battleGetStackByID(gs->getBattle(battleID)->activeStack, false));
+		auto unlockInterface = vstd::makeUnlockGuard(GH.interfaceMutex);
+		battleint->activeStack(battleID, gs->getBattle(battleID)->battleGetStackByID(gs->getBattle(battleID)->activeStack, false));
+	}
+	else
+	{
+		battleint->activeStack(battleID, gs->getBattle(battleID)->battleGetStackByID(gs->getBattle(battleID)->activeStack, false));
 	}
 }
 
@@ -675,7 +678,7 @@ std::shared_ptr<const CPathsInfo> CClient::getPathsInfo(const CGHeroInstance * h
 
 	if(iter == std::end(pathCache))
 	{
-		std::shared_ptr<CPathsInfo> paths = std::make_shared<CPathsInfo>(getMapSize(), h);
+		auto paths = std::make_shared<CPathsInfo>(getMapSize(), h);
 
 		gs->calculatePaths(h, *paths.get());
 
@@ -703,7 +706,7 @@ void CClient::reinitScripting()
 #endif
 }
 
-void CClient::removeGUI()
+void CClient::removeGUI() const
 {
 	// CClient::endGame
 	GH.curInt = nullptr;

@@ -90,7 +90,8 @@ void CBattleAI::yourTacticPhase(const BattleID & battleID, int distance)
 static float getStrengthRatio(std::shared_ptr<CBattleInfoCallback> cb, int side)
 {
 	auto stacks = cb->battleGetAllStacks();
-	auto our = 0, enemy = 0;
+	auto our = 0;
+	auto enemy = 0;
 
 	for(auto stack : stacks)
 	{
@@ -145,7 +146,7 @@ void CBattleAI::activeStack(const BattleID & battleID, const CStack * stack )
 
 		result = evaluator.selectStackAction(stack);
 
-		if(!skipCastUntilNextBattle && evaluator.canCastSpell())
+		if(autobattlePreferences.enableSpellsUsage && !skipCastUntilNextBattle && evaluator.canCastSpell())
 		{
 			auto spelCasted = evaluator.attemptCastingSpell(stack);
 
@@ -197,7 +198,7 @@ BattleAction CBattleAI::useCatapult(const BattleID & battleID, const CStack * st
 	}
 	else
 	{
-		EWallPart wallParts[] = {
+		std::array wallParts {
 			EWallPart::KEEP,
 			EWallPart::BOTTOM_TOWER,
 			EWallPart::UPPER_TOWER,

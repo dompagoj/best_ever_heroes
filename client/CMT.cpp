@@ -24,6 +24,7 @@
 #include "CServerHandler.h"
 #include "ClientCommandManager.h"
 #include "windows/CMessage.h"
+#include "windows/InfoWindows.h"
 #include "render/IScreenHandler.h"
 #include "render/Graphics.h"
 
@@ -54,12 +55,14 @@
 namespace po = boost::program_options;
 namespace po_style = boost::program_options::command_line_style;
 
+static std::atomic<bool> quitRequestedDuringOpeningPlayback = false;
 static po::variables_map vm;
 
 #ifndef VCMI_IOS
 void processCommand(const std::string &message);
 #endif
 void playIntro();
+[[noreturn]] static void quitApplication();
 static void mainLoop();
 
 static CBasicLogConfigurator *logConfig;
@@ -69,7 +72,7 @@ void init()
 	CStopWatch tmh;
 
 	loadDLLClasses();
-	const_cast<CGameInfo*>(CGI)->setFromLib();
+	CGI->setFromLib();
 
 	logGlobal->info("Initializing VCMI_Lib: %d ms", tmh.getDiff());
 
@@ -86,7 +89,7 @@ static void prog_version()
 
 static void prog_help(const po::options_description &opts)
 {
-	auto time = std::time(0);
+	auto time = std::time(nullptr);
 	printf("%s - A Heroes of Might and Magic 3 clone\n", GameConstants::VCMI_VERSION.c_str());
 	printf("Copyright (C) 2007-%d VCMI dev team - see AUTHORS file\n", std::localtime(&time)->tm_year + 1900);
 	printf("This is free software; see the source for copying conditions. There is NO\n");
@@ -126,7 +129,7 @@ int main(int argc, char * argv[])
 		("spectate-battle-speed", po::value<int>(), "battle animation speed for spectator")
 		("spectate-skip-battle", "skip battles in spectator view")
 		("spectate-skip-battle-result", "skip battle result window")
-		("onlyAI", "allow to run without human player, all players will be default AI")
+		("onlyAI", "allow one to run without human player, all players will be default AI")
 		("headless", "runs without GUI, implies --onlyAI")
 		("ai", po::value<std::vector<std::string>>(), "AI to be used for the player, can be specified several times for the consecutive players")
 		("oneGoodAI", "puts one default AI and the rest will be EmptyAI")
@@ -179,7 +182,8 @@ int main(int argc, char * argv[])
 	}
 
 	// Init old logging system and new (temporary) logging system
-	CStopWatch total, pomtime;
+	CStopWatch total;
+	CStopWatch pomtime;
 	std::cout.flags(std::ios::unitbuf);
 #ifndef VCMI_IOS
 	console = new CConsoleHandler();
@@ -202,7 +206,7 @@ int main(int argc, char * argv[])
 	logGlobal->info("The log file will be saved to %s", logPath);
 
 	// Init filesystem and settings
-	preinitDLL(::console);
+	preinitDLL(::console, false);
 
 	Settings session = settings.write["session"];
 	auto setSettingBool = [](std::string key, std::string arg) {
@@ -256,10 +260,10 @@ int main(int argc, char * argv[])
 	};
 
 	testFile("DATA/HELP.TXT", "VCMI requires Heroes III: Shadow of Death or Heroes III: Complete data files to run!");
-	testFile("MODS/VCMI/MOD.JSON", "VCMI installation is corrupted! Built-in mod was not found!");
-	testFile("DATA/PLAYERS.PAL", "Heroes III data files are missing or corruped! Please reinstall them.");
-	testFile("SPRITES/DEFAULT.DEF", "Heroes III data files are missing or corruped! Please reinstall them.");
 	testFile("DATA/TENTCOLR.TXT", "Heroes III: Restoration of Erathia (including HD Edition) data files are not supported!");
+	testFile("MODS/VCMI/MOD.JSON", "VCMI installation is corrupted! Built-in mod was not found!");
+	testFile("DATA/PLAYERS.PAL", "Heroes III data files (Data/H3Bitmap.lod) are incomplete or corruped! Please reinstall them.");
+	testFile("SPRITES/DEFAULT.DEF", "Heroes III data files (Data/H3Sprite.lod) are incomplete or corruped! Please reinstall them.");
 
 	srand ( (unsigned int)time(nullptr) );
 
@@ -312,7 +316,6 @@ int main(int argc, char * argv[])
 		GH.screenHandler().clearScreen();
 	}
 
-
 #ifndef VCMI_NO_THREADED_LOAD
 	#ifdef VCMI_ANDROID // android loads the data quite slowly so we display native progressbar to prevent having only black screen for few seconds
 	{
@@ -325,6 +328,9 @@ int main(int argc, char * argv[])
 	}
 	#endif // ANDROID
 #endif // THREADED
+
+	if (quitRequestedDuringOpeningPlayback)
+		quitApplication();
 
 	if(!settings["session"]["headless"].Bool())
 	{
@@ -345,7 +351,6 @@ int main(int argc, char * argv[])
 	session["autoSkip"].Bool()  = vm.count("autoSkip");
 	session["oneGoodAI"].Bool() = vm.count("oneGoodAI");
 	session["aiSolo"].Bool() = false;
-	std::shared_ptr<CMainMenu> mmenu;
 	
 	if(vm.count("testmap"))
 	{
@@ -361,7 +366,7 @@ int main(int argc, char * argv[])
 	}
 	else
 	{
-		mmenu = CMainMenu::create();
+		auto mmenu = CMainMenu::create();
 		GH.curInt = mmenu.get();
 	}
 	
@@ -398,7 +403,7 @@ int main(int argc, char * argv[])
 		//start lobby immediately
 		names.push_back(session["username"].String());
 		ESelectionScreen sscreen = session["gamemode"].Integer() == 0 ? ESelectionScreen::newGame : ESelectionScreen::loadGame;
-		mmenu->openLobby(sscreen, session["host"].Bool(), &names, ELoadMode::MULTI);
+		CMM->openLobby(sscreen, session["host"].Bool(), &names, ELoadMode::MULTI);
 	}
 	
 	// Restore remote session - start game immediately
@@ -414,7 +419,7 @@ int main(int argc, char * argv[])
 	else
 	{
 		while(true)
-			boost::this_thread::sleep_for(boost::chrono::milliseconds(1000));
+			boost::this_thread::sleep_for(boost::chrono::milliseconds(200));
 	}
 
 	return 0;
@@ -423,11 +428,20 @@ int main(int argc, char * argv[])
 //plays intro, ends when intro is over or button has been pressed (handles events)
 void playIntro()
 {
-	if(CCS->videoh->openAndPlayVideo(VideoPath::builtin("3DOLOGO.SMK"), 0, 1, true, true))
+	auto audioData = CCS->videoh->getAudio(VideoPath::builtin("3DOLOGO.SMK"));
+	int sound = CCS->soundh->playSound(audioData);
+	if(CCS->videoh->openAndPlayVideo(VideoPath::builtin("3DOLOGO.SMK"), 0, 1, EVideoType::INTRO))
 	{
-		if (CCS->videoh->openAndPlayVideo(VideoPath::builtin("NWCLOGO.SMK"), 0, 1, true, true))
-			CCS->videoh->openAndPlayVideo(VideoPath::builtin("H3INTRO.SMK"), 0, 1, true, true);
+		audioData = CCS->videoh->getAudio(VideoPath::builtin("NWCLOGO.SMK"));
+		sound = CCS->soundh->playSound(audioData);
+		if (CCS->videoh->openAndPlayVideo(VideoPath::builtin("NWCLOGO.SMK"), 0, 1, EVideoType::INTRO))
+		{
+			audioData = CCS->videoh->getAudio(VideoPath::builtin("H3INTRO.SMK"));
+			sound = CCS->soundh->playSound(audioData);
+			CCS->videoh->openAndPlayVideo(VideoPath::builtin("H3INTRO.SMK"), 0, 1, EVideoType::INTRO);
+		}
 	}
+	CCS->soundh->stopSound(sound);
 }
 
 static void mainLoop()
@@ -442,15 +456,15 @@ static void mainLoop()
 	}
 }
 
-static void quitApplication()
+[[noreturn]] static void quitApplication()
 {
 	if(!settings["session"]["headless"].Bool())
 	{
 		if(CSH->client)
 			CSH->endGameplay();
-	}
 
-	GH.windows().clear();
+		GH.windows().clear();
+	}
 
 	CMM.reset();
 
@@ -462,6 +476,12 @@ static void quitApplication()
 			CCS->musich->release();
 			CCS->soundh->release();
 
+			delete CCS->consoleh;
+			delete CCS->curh;
+			delete CCS->videoh;
+			delete CCS->musich;
+			delete CCS->soundh;
+
 			vstd::clear_pointer(CCS);
 		}
 		CMessage::dispose();
@@ -469,11 +489,11 @@ static void quitApplication()
 		vstd::clear_pointer(graphics);
 	}
 
+	vstd::clear_pointer(CSH);
 	vstd::clear_pointer(VLC);
 
-	vstd::clear_pointer(console);// should be removed after everything else since used by logging
-
-	boost::this_thread::sleep_for(boost::chrono::milliseconds(750));//???
+	// sometimes leads to a hang. TODO: investigate
+	//vstd::clear_pointer(console);// should be removed after everything else since used by logging
 
 	if(!settings["session"]["headless"].Bool())
 		GH.screenHandler().close();
@@ -486,20 +506,42 @@ static void quitApplication()
 	}
 
 	std::cout << "Ending...\n";
-	exit(0);
+
+	// Perform quick exit without executing static destructors and let OS cleanup anything that we did not
+	// We generally don't care about them and this leads to numerous issues, e.g.
+	// destruction of locked mutexes (fails an assertion), even in third-party libraries (as well as native libs on Android)
+	// Android - std::quick_exit is available only starting from API level 21
+	// Mingw, macOS and iOS - std::quick_exit is unavailable (at least in current version of CI)
+#if (defined(__ANDROID_API__) && __ANDROID_API__ < 21) || (defined(__MINGW32__)) || defined(VCMI_APPLE)
+	::exit(0);
+#else
+	std::quick_exit(0);
+#endif
 }
 
 void handleQuit(bool ask)
 {
-	if(CSH->client && LOCPLINT && ask)
-	{
-		CCS->curh->set(Cursor::Map::POINTER);
-		LOCPLINT->showYesNoDialog(CGI->generaltexth->allTexts[69], quitApplication, nullptr);
-	}
-	else
+	// FIXME: avoids crash if player attempts to close game while opening is still playing
+	// use cursor handler as indicator that loading is not done yet
+	// proper solution would be to abort init thread (or wait for it to finish)
+	if(!ask)
 	{
 		quitApplication();
+		return;
 	}
+
+	if (!CCS->curh)
+	{
+		quitRequestedDuringOpeningPlayback = true;
+		return;
+	}
+
+	CCS->curh->set(Cursor::Map::POINTER);
+
+	if (LOCPLINT)
+		LOCPLINT->showYesNoDialog(CGI->generaltexth->allTexts[69], quitApplication, nullptr);
+	else
+		CInfoWindow::showYesNoDialog(CGI->generaltexth->allTexts[69], {}, quitApplication, {}, PlayerColor(1));
 }
 
 void handleFatalError(const std::string & message, bool terminate)

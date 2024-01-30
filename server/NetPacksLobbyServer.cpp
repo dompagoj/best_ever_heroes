@@ -13,7 +13,6 @@
 #include "CVCMIServer.h"
 #include "CGameHandler.h"
 
-#include "../lib/NetPacksLobby.h"
 #include "../lib/serializer/Connection.h"
 #include "../lib/StartInfo.h"
 
@@ -189,6 +188,12 @@ void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyClientDisconnected(Lobb
 		srv.addToAnnounceQueue(std::move(ph));
 	}
 	srv.updateAndPropagateLobbyState();
+	
+//	if(srv.getState() != EServerState::SHUTDOWN && srv.remoteConnections.count(pack.c))
+//	{
+//		srv.remoteConnections -= pack.c;
+//		srv.connectToRemote();
+//	}
 }
 
 void ClientPermissionsCheckerNetPackVisitor::visitLobbyChatMessage(LobbyChatMessage & pack)
@@ -363,19 +368,19 @@ void ApplyOnServerNetPackVisitor::visitLobbyChangePlayerOption(LobbyChangePlayer
 	switch(pack.what)
 	{
 	case LobbyChangePlayerOption::TOWN_ID:
-		srv.optionSetCastle(pack.color, pack.value);
+		srv.optionSetCastle(pack.color, FactionID(pack.value));
 		break;
 	case LobbyChangePlayerOption::TOWN:
 		srv.optionNextCastle(pack.color, pack.value);
 		break;
 	case LobbyChangePlayerOption::HERO_ID:
-		srv.optionSetHero(pack.color, pack.value);
+		srv.optionSetHero(pack.color, HeroTypeID(pack.value));
 		break;
 	case LobbyChangePlayerOption::HERO:
 		srv.optionNextHero(pack.color, pack.value);
 		break;
 	case LobbyChangePlayerOption::BONUS_ID:
-		srv.optionSetBonus(pack.color, pack.value);
+		srv.optionSetBonus(pack.color, PlayerStartingBonus(pack.value));
 		break;
 	case LobbyChangePlayerOption::BONUS:
 		srv.optionNextBonus(pack.color, pack.value);
@@ -391,6 +396,12 @@ void ApplyOnServerNetPackVisitor::visitLobbySetPlayer(LobbySetPlayer & pack)
 	result = true;
 }
 
+void ApplyOnServerNetPackVisitor::visitLobbySetPlayerName(LobbySetPlayerName & pack)
+{
+	srv.setPlayerName(pack.color, pack.name);
+	result = true;
+}
+
 void ApplyOnServerNetPackVisitor::visitLobbySetSimturns(LobbySetSimturns & pack)
 {
 	srv.si->simturnsInfo = pack.simturnsInfo;
@@ -400,6 +411,12 @@ void ApplyOnServerNetPackVisitor::visitLobbySetSimturns(LobbySetSimturns & pack)
 void ApplyOnServerNetPackVisitor::visitLobbySetTurnTime(LobbySetTurnTime & pack)
 {
 	srv.si->turnTimerInfo = pack.turnTimerInfo;
+	result = true;
+}
+
+void ApplyOnServerNetPackVisitor::visitLobbySetExtraOptions(LobbySetExtraOptions & pack)
+{
+	srv.si->extraOptionsInfo = pack.extraOptionsInfo;
 	result = true;
 }
 

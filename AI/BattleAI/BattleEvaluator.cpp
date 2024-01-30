@@ -58,7 +58,7 @@ std::vector<BattleHex> BattleEvaluator::getBrokenWallMoatHexes() const
 		if(state != EWallState::DESTROYED)
 			continue;
 
-		auto wallHex = cb->getBattle(battleID)->wallPartToBattleHex((EWallPart)wallPart);
+		auto wallHex = cb->getBattle(battleID)->wallPartToBattleHex(wallPart);
 		auto moatHex = wallHex.cloneInDirection(BattleHex::LEFT);
 
 		result.push_back(moatHex);
@@ -70,8 +70,9 @@ std::vector<BattleHex> BattleEvaluator::getBrokenWallMoatHexes() const
 std::optional<PossibleSpellcast> BattleEvaluator::findBestCreatureSpell(const CStack *stack)
 {
 	//TODO: faerie dragon type spell should be selected by server
-	SpellID creatureSpellToCast = cb->getBattle(battleID)->battleGetRandomStackSpell(CRandomGenerator::getDefault(), stack, CBattleInfoCallback::RANDOM_AIMED);
-	if(stack->hasBonusOfType(BonusType::SPELLCASTER) && stack->canCast() && creatureSpellToCast != SpellID::NONE)
+	SpellID creatureSpellToCast = cb->getBattle(battleID)->getRandomCastedSpell(CRandomGenerator::getDefault(), stack);
+
+	if(stack->canCast() && creatureSpellToCast != SpellID::NONE)
 	{
 		const CSpell * spell = creatureSpellToCast.toSpell();
 
@@ -142,14 +143,14 @@ BattleAction BattleEvaluator::selectStackAction(const CStack * stack)
 			logAi->debug("BattleAI: %s -> %s x %d, from %d curpos %d dist %d speed %d: +%2f -%2f = %2f",
 				bestAttack.attackerState->unitType()->getJsonKey(),
 				bestAttack.affectedUnits[0]->unitType()->getJsonKey(),
-				(int)bestAttack.affectedUnits[0]->getCount(),
+				bestAttack.affectedUnits[0]->getCount(),
 				(int)bestAttack.from,
 				(int)bestAttack.attack.attacker->getPosition().hex,
 				bestAttack.attack.chargeDistance,
-				bestAttack.attack.attacker->speed(0, true),
+				bestAttack.attack.attacker->getMovementRange(0),
 				bestAttack.defenderDamageReduce,
 				bestAttack.attackerDamageReduce,
-				bestAttack.attackValue()
+				score
 			);
 
 			if (moveTarget.scorePerTurn <= score)
@@ -190,6 +191,14 @@ BattleAction BattleEvaluator::selectStackAction(const CStack * stack)
 
 		if(stack->waited())
 		{
+			logAi->debug(
+				"Moving %s towards hex %s[%d], score: %2f/%2f",
+				stack->getDescription(),
+				moveTarget.cachedAttack->attack.defender->getDescription(),
+				moveTarget.cachedAttack->attack.defender->getPosition().hex,
+				moveTarget.score,
+				moveTarget.scorePerTurn);
+
 			return goTowardsNearest(stack, moveTarget.positions);
 		}
 		else
@@ -216,7 +225,7 @@ BattleAction BattleEvaluator::selectStackAction(const CStack * stack)
 		}
 	}
 
-	return BattleAction::makeDefend(stack);
+	return stack->waited() ?  BattleAction::makeDefend(stack) : BattleAction::makeWait(stack);
 }
 
 uint64_t timeElapsed(std::chrono::time_point<std::chrono::high_resolution_clock> start)
@@ -307,7 +316,7 @@ BattleAction BattleEvaluator::goTowardsNearest(const CStack * stack, std::vector
 	else
 	{
 		BattleHex currentDest = bestNeighbor;
-		while(1)
+		while(true)
 		{
 			if(!currentDest.isValid())
 			{
@@ -341,10 +350,11 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 	LOGL("Casting spells sounds like fun. Let's see...");
 	//Get all spells we can cast
 	std::vector<const CSpell*> possibleSpells;
-	vstd::copy_if(VLC->spellh->objects, std::back_inserter(possibleSpells), [hero, this](const CSpell *s) -> bool
-	{
-		return s->canBeCast(cb->getBattle(battleID).get(), spells::Mode::HERO, hero);
-	});
+
+	for (auto const & s : VLC->spellh->objects)
+		if (s->canBeCast(cb->getBattle(battleID).get(), spells::Mode::HERO, hero))
+			possibleSpells.push_back(s.get());
+
 	LOGFL("I can cast %d spells.", possibleSpells.size());
 
 	vstd::erase_if(possibleSpells, [](const CSpell *s)
@@ -419,33 +429,36 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 
 				state->nextTurn(unit->unitId());
 
-				PotentialTargets pt(unit, damageCache, state);
+				PotentialTargets potentialTargets(unit, damageCache, state);
 
-				if(!pt.possibleAttacks.empty())
+				if(!potentialTargets.possibleAttacks.empty())
 				{
-					AttackPossibility ap = pt.bestAction();
+					AttackPossibility attackPossibility = potentialTargets.bestAction();
 
-					auto swb = state->getForUpdate(unit->unitId());
-					*swb = *ap.attackerState;
+					auto stackWithBonuses = state->getForUpdate(unit->unitId());
+					*stackWithBonuses = *attackPossibility.attackerState;
 
-					if(ap.defenderDamageReduce > 0)
-						swb->removeUnitBonus(Bonus::UntilAttack);
-					if(ap.attackerDamageReduce > 0)
-						swb->removeUnitBonus(Bonus::UntilBeingAttacked);
-
-					for(auto affected : ap.affectedUnits)
+					if(attackPossibility.defenderDamageReduce > 0)
 					{
-						swb = state->getForUpdate(affected->unitId());
-						*swb = *affected;
+						stackWithBonuses->removeUnitBonus(Bonus::UntilAttack);
+						stackWithBonuses->removeUnitBonus(Bonus::UntilOwnAttack);
+					}
+					if(attackPossibility.attackerDamageReduce > 0)
+						stackWithBonuses->removeUnitBonus(Bonus::UntilBeingAttacked);
 
-						if(ap.defenderDamageReduce > 0)
-							swb->removeUnitBonus(Bonus::UntilBeingAttacked);
-						if(ap.attackerDamageReduce > 0 && ap.attack.defender->unitId() == affected->unitId())
-							swb->removeUnitBonus(Bonus::UntilAttack);
+					for(auto affected : attackPossibility.affectedUnits)
+					{
+						stackWithBonuses = state->getForUpdate(affected->unitId());
+						*stackWithBonuses = *affected;
+
+						if(attackPossibility.defenderDamageReduce > 0)
+							stackWithBonuses->removeUnitBonus(Bonus::UntilBeingAttacked);
+						if(attackPossibility.attackerDamageReduce > 0 && attackPossibility.attack.defender->unitId() == affected->unitId())
+							stackWithBonuses->removeUnitBonus(Bonus::UntilAttack);
 					}
 				}
 
-				auto bav = pt.bestActionValue();
+				auto bav = potentialTargets.bestActionValue();
 
 				//best action is from effective owner`s point if view, we need to convert to our point if view
 				if(state->battleGetOwner(unit) != playerID)
@@ -541,7 +554,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 				auto needFullEval = vstd::contains_if(allUnits, [&](const battle::Unit * u) -> bool
 					{
 						auto original = cb->getBattle(battleID)->battleGetUnitByID(u->unitId());
-						return  !original || u->speed() != original->speed();
+						return  !original || u->getMovementRange() != original->getMovementRange();
 					});
 
 				DamageCache safeCopy = damageCache;
@@ -572,7 +585,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 				}
 				else
 				{
-					ps.value = scoreEvaluator.calculateExchange(*cachedAttack, *targets, innerCache, state);
+					ps.value = scoreEvaluator.evaluateExchange(*cachedAttack, 0, *targets, innerCache, state);
 				}
 
 				for(auto unit : allUnits)
@@ -597,7 +610,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 
 						if(ourUnit * goodEffect == 1)
 						{
-							if(ourUnit && goodEffect && (unit->isClone() || unit->isGhost() || !unit->unitSlot().validSlot()))
+							if(ourUnit && goodEffect && (unit->isClone() || unit->isGhost()))
 								continue;
 
 							ps.value += dpsReduce * scoreEvaluator.getPositiveEffectMultiplier();

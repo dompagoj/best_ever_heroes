@@ -15,6 +15,7 @@
 #include "../RmgMap.h"
 #include "../CMapGenerator.h"
 #include "TreasurePlacer.h"
+#include "PrisonHeroPlacer.h"
 #include "QuestArtifactPlacer.h"
 #include "TownPlacer.h"
 #include "TerrainPainter.h"
@@ -42,8 +43,6 @@ void ObjectDistributor::init()
 
 void ObjectDistributor::distributeLimitedObjects()
 {
-	//FIXME: Must be called after TerrainPainter::process()
-
 	ObjectInfo oi;
 	auto zones = map.getZones();
 
@@ -77,27 +76,17 @@ void ObjectDistributor::distributeLimitedObjects()
 
 					auto rmgInfo = handler->getRMGInfo();
 
+					RandomGeneratorUtil::randomShuffle(matchingZones, zone.getRand());
 					for (auto& zone : matchingZones)
 					{
-						//We already know there are some templates
-						auto templates = handler->getTemplates(zone->getTerrainType());
-
-						//FIXME: Templates empty?! Maybe zone changed terrain type over time?
-
-						//Assume the template with fewest terrains is the most suitable
-						auto temp = *boost::min_element(templates, [](std::shared_ptr<const ObjectTemplate> lhs, std::shared_ptr<const ObjectTemplate> rhs) -> bool
+						oi.generateObject = [cb=map.mapInstance->cb, primaryID, secondaryID]() -> CGObjectInstance *
 						{
-							return lhs->getAllowedTerrains().size() < rhs->getAllowedTerrains().size();
-						});
-
-						oi.generateObject = [temp]() -> CGObjectInstance *
-						{
-							return VLC->objtypeh->getHandlerFor(temp->id, temp->subid)->create(temp);
+							return VLC->objtypeh->getHandlerFor(primaryID, secondaryID)->create(cb, nullptr);
 						};
 						
 						oi.value = rmgInfo.value;
 						oi.probability = rmgInfo.rarity;
-						oi.templ = temp;
+						oi.setTemplates(primaryID, secondaryID, zone->getTerrainType());
 
 						//Rounding up will make sure all possible objects are exhausted
 						uint32_t mapLimit = rmgInfo.mapLimit.value();
@@ -109,7 +98,7 @@ void ObjectDistributor::distributeLimitedObjects()
 
 						rmgInfo.setMapLimit(mapLimit - oi.maxPerZone);
 						//Don't add objects with 0 count remaining
-						if (oi.maxPerZone)
+						if(oi.maxPerZone && !oi.templates.empty())
 						{
 							zone->getModificator<TreasurePlacer>()->addObjectToRandomPool(oi);
 						}
@@ -157,7 +146,18 @@ void ObjectDistributor::distributePrisons()
 
 	RandomGeneratorUtil::randomShuffle(zones, zone.getRand());
 
-	size_t allowedPrisons = generator.getPrisonsRemaning();
+	// TODO: Some shorthand for unique Modificator
+	PrisonHeroPlacer * prisonHeroPlacer = nullptr;
+	for(auto & z : map.getZones())
+	{
+		prisonHeroPlacer = z.second->getModificator<PrisonHeroPlacer>();
+		if (prisonHeroPlacer)
+		{
+			break;
+		}
+	}
+
+	size_t allowedPrisons = prisonHeroPlacer->getPrisonsRemaning();
 	for (int i = zones.size() - 1; i >= 0; i--)
 	{
 		auto zone = zones[i].second;

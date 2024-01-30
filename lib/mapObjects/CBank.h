@@ -23,11 +23,11 @@ class DLL_LINKAGE CBank : public CArmedInstance
 	ui32 resetDuration;
 	bool coastVisitable;
 
-	void setPropertyDer(ui8 what, ui32 val) override;
+	void setPropertyDer(ObjProperty what, ObjPropertyID identifier) override;
 	void doVisit(const CGHeroInstance * hero) const;
 
 public:
-	CBank();
+	CBank(IGameCallback *cb);
 	~CBank() override;
 
 	void setConfig(const BankConfig & bc);
@@ -41,7 +41,9 @@ public:
 	void battleFinished(const CGHeroInstance *hero, const BattleResult &result) const override;
 	void blockingDialogAnswered(const CGHeroInstance *hero, ui32 answer) const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	std::vector<Component> getPopupComponents(PlayerColor player) const override;
+
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CArmedInstance&>(*this);
 		h & daycounter;

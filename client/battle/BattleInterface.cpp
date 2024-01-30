@@ -29,6 +29,7 @@
 #include "../gui/CursorHandler.h"
 #include "../gui/CGuiHandler.h"
 #include "../gui/WindowHandler.h"
+#include "../windows/CTutorialWindow.h"
 #include "../render/Canvas.h"
 #include "../adventureMap/AdventureMapInterface.h"
 
@@ -40,7 +41,7 @@
 #include "../../lib/CondSh.h"
 #include "../../lib/gameState/InfoAboutArmy.h"
 #include "../../lib/mapObjects/CGTownInstance.h"
-#include "../../lib/NetPacks.h"
+#include "../../lib/networkPacks/PacksForClientBattle.h"
 #include "../../lib/UnlockGuard.h"
 #include "../../lib/TerrainHandler.h"
 #include "../../lib/CThreadHelper.h"
@@ -57,6 +58,7 @@ BattleInterface::BattleInterface(const BattleID & battleID, const CCreatureSet *
 	, curInt(att)
 	, battleID(battleID)
 	, battleOpeningDelayActive(true)
+	, round(0)
 {
 	if(spectatorInt)
 	{
@@ -106,8 +108,8 @@ void BattleInterface::playIntroSoundAndUnlockInterface()
 {
 	auto onIntroPlayed = [this]()
 	{
-		boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
-		if(LOCPLINT->battleInt)
+		// Make sure that battle have not ended while intro was playing AND that a different one has not started
+		if(LOCPLINT->battleInt.get() == this)
 			onIntroSoundPlayed();
 	};
 
@@ -149,6 +151,8 @@ void BattleInterface::openingEnd()
 		tacticNextStack(nullptr);
 	activateStack();
 	battleOpeningDelayActive = false;
+
+	CTutorialWindow::openWindowFirstTime(TutorialMode::TOUCH_BATTLE);
 }
 
 BattleInterface::~BattleInterface()
@@ -232,6 +236,7 @@ void BattleInterface::newRoundFirst()
 void BattleInterface::newRound()
 {
 	console->addText(CGI->generaltexth->allTexts[412]);
+	round++;
 }
 
 void BattleInterface::giveCommand(EActionType action, BattleHex tile, SpellID spell)
@@ -347,12 +352,12 @@ void BattleInterface::spellCast(const BattleSpellCast * sc)
 	CCS->curh->set(Cursor::Combat::BLOCKED);
 
 	const SpellID spellID = sc->spellID;
+
+	if(!spellID.hasValue())
+		return;
+
 	const CSpell * spell = spellID.toSpell();
 	auto targetedTile = sc->tile;
-
-	assert(spell);
-	if(!spell)
-		return;
 
 	const AudioPath & castSoundPath = spell->getCastSound();
 
@@ -635,7 +640,7 @@ void BattleInterface::tacticPhaseEnd()
 
 static bool immobile(const CStack *s)
 {
-	return !s->speed(0, true); //should bound stacks be immobile?
+	return s->getMovementRange() == 0; //should bound stacks be immobile?
 }
 
 void BattleInterface::tacticNextStack(const CStack * current)
@@ -781,7 +786,7 @@ void BattleInterface::onAnimationsFinished()
 void BattleInterface::waitForAnimations()
 {
 	{
-		auto unlockPim = vstd::makeUnlockGuard(*CPlayerInterface::pim);
+		auto unlockInterface = vstd::makeUnlockGuard(GH.interfaceMutex);
 		ongoingAnimationsState.waitUntil(false);
 	}
 

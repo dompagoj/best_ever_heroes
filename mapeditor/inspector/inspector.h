@@ -18,7 +18,9 @@
 #include "../lib/mapObjects/CGCreature.h"
 #include "../lib/mapObjects/MapObjects.h"
 #include "../lib/mapObjects/CRewardableObject.h"
+#include "../lib/CGeneralTextHandler.h"
 #include "../lib/ResourceSet.h"
+#include "../lib/MetaString.h"
 
 #define DECLARE_OBJ_TYPE(x) void initialize(x*);
 #define DECLARE_OBJ_PROPERTY_METHODS(x) \
@@ -30,6 +32,7 @@ void setProperty(x*, const QString &, const QVariant &);
 #define SET_PROPERTIES(x) setProperty(dynamic_cast<x*>(obj), key, value)
 
 
+class MapController;
 class Initializer
 {
 public:
@@ -42,6 +45,7 @@ public:
 	DECLARE_OBJ_TYPE(CGResource);
 	DECLARE_OBJ_TYPE(CGDwelling);
 	DECLARE_OBJ_TYPE(CGGarrison);
+	DECLARE_OBJ_TYPE(CGHeroPlaceholder);
 	DECLARE_OBJ_TYPE(CGHeroInstance);
 	DECLARE_OBJ_TYPE(CGCreature);
 	DECLARE_OBJ_TYPE(CGSignBottle);
@@ -71,6 +75,7 @@ protected:
 	DECLARE_OBJ_PROPERTY_METHODS(CGResource);
 	DECLARE_OBJ_PROPERTY_METHODS(CGDwelling);
 	DECLARE_OBJ_PROPERTY_METHODS(CGGarrison);
+	DECLARE_OBJ_PROPERTY_METHODS(CGHeroPlaceholder);
 	DECLARE_OBJ_PROPERTY_METHODS(CGHeroInstance);
 	DECLARE_OBJ_PROPERTY_METHODS(CGCreature);
 	DECLARE_OBJ_PROPERTY_METHODS(CGSignBottle);
@@ -79,10 +84,13 @@ protected:
 	DECLARE_OBJ_PROPERTY_METHODS(CGPandoraBox);
 	DECLARE_OBJ_PROPERTY_METHODS(CGEvent);
 	DECLARE_OBJ_PROPERTY_METHODS(CGSeerHut);
+	DECLARE_OBJ_PROPERTY_METHODS(CGQuestGuard);
 
 //===============DECLARE PROPERTY VALUE TYPE==============================
 	QTableWidgetItem * addProperty(unsigned int value);
 	QTableWidgetItem * addProperty(int value);
+	QTableWidgetItem * addProperty(const MetaString & value);
+	QTableWidgetItem * addProperty(const TextIdentifier & value);
 	QTableWidgetItem * addProperty(const std::string & value);
 	QTableWidgetItem * addProperty(const QString & value);
 	QTableWidgetItem * addProperty(const int3 & value);
@@ -91,13 +99,12 @@ protected:
 	QTableWidgetItem * addProperty(bool value);
 	QTableWidgetItem * addProperty(CGObjectInstance * value);
 	QTableWidgetItem * addProperty(CGCreature::Character value);
-	QTableWidgetItem * addProperty(CQuest::Emission value);
 	QTableWidgetItem * addProperty(PropertyEditorPlaceholder value);
 	
 //===============END OF DECLARATION=======================================
 	
 public:
-	Inspector(CMap *, CGObjectInstance *, QTableWidget *);
+	Inspector(MapController &, CGObjectInstance *, QTableWidget *);
 
 	void setProperty(const QString & key, const QTableWidgetItem * item);
 	
@@ -121,7 +128,6 @@ protected:
 		{
 			itemKey = keyItems[key];
 			table->setItem(table->row(itemKey), 1, itemValue);
-			if(delegate)
 				table->setItemDelegateForRow(table->row(itemKey), delegate);
 		}
 		else
@@ -132,7 +138,6 @@ protected:
 			table->setRowCount(row + 1);
 			table->setItem(row, 0, itemKey);
 			table->setItem(row, 1, itemValue);
-			if(delegate)
 				table->setItemDelegateForRow(row, delegate);
 			++row;
 		}
@@ -144,16 +149,14 @@ protected:
 	{
 		addProperty<T>(key, value, nullptr, restricted);
 	}
-
+	
 protected:
 	int row = 0;
 	QTableWidget * table;
 	CGObjectInstance * obj;
 	QMap<QString, QTableWidgetItem*> keyItems;
-	CMap * map;
+	MapController & controller;
 };
-
-
 
 
 class InspectorDelegate : public QStyledItemDelegate
@@ -168,4 +171,3 @@ public:
 	
 	QList<std::pair<QString, QVariant>> options;
 };
-

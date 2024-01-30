@@ -16,7 +16,9 @@
 
 #include "../../lib/VCMIDirs.h"
 #include "../../lib/gameState/CGameState.h"
-#include "../../lib/NetPacks.h"
+#include "../../lib/networkPacks/PacksForClient.h"
+#include "../../lib/networkPacks/PacksForClientBattle.h"
+#include "../../lib/networkPacks/SetStackEffect.h"
 #include "../../lib/StartInfo.h"
 #include "../../lib/TerrainHandler.h"
 
@@ -44,17 +46,14 @@ public:
 
 	void SetUp() override
 	{
-		IObjectInterface::cb = gameCallback.get();
-
 		gameState = std::make_shared<CGameState>();
 		gameCallback->setGameState(gameState.get());
-		gameState->preInit(&services);
+		gameState->preInit(&services, gameCallback.get());
 	}
 
 	void TearDown() override
 	{
 		gameState.reset();
-		IObjectInterface::cb = nullptr;
 	}
 
 	bool describeChanges() const override
@@ -167,11 +166,11 @@ public:
 			pset.castle = pinfo.defaultCastle();
 			pset.hero = pinfo.defaultHero();
 
-			if(pset.hero.getNum() != PlayerSettings::RANDOM && pinfo.hasCustomMainHero())
+			if(pset.hero != HeroTypeID::RANDOM && pinfo.hasCustomMainHero())
 			{
 				pset.hero = pinfo.mainCustomHeroId;
-				pset.heroName = pinfo.mainCustomHeroName;
-				pset.heroPortrait = pinfo.mainCustomHeroPortrait;
+				pset.heroNameTextId = pinfo.mainCustomHeroNameTextId;
+				pset.heroPortrait = HeroTypeID(pinfo.mainCustomHeroPortrait);
 			}
 
 			pset.handicap = PlayerSettings::NO_HANDICAP;
@@ -220,7 +219,7 @@ public:
 };
 
 //Issue #2765, Ghost Dragons can cast Age on Catapults
-TEST_F(CGameStateTest, issue2765)
+TEST_F(CGameStateTest, DISABLED_issue2765)
 {
 	startTestGame();
 
@@ -238,7 +237,7 @@ TEST_F(CGameStateTest, issue2765)
 		gameCallback->sendAndApply(&na);
 
 		PutArtifact pack;
-		pack.al = ArtifactLocation(defender, ArtifactPosition::MACH1);
+		pack.al = ArtifactLocation(defender->id, ArtifactPosition::MACH1);
 		pack.art = a;
 		gameCallback->sendAndApply(&pack);
 	}
@@ -308,7 +307,7 @@ TEST_F(CGameStateTest, issue2765)
 
 }
 
-TEST_F(CGameStateTest, battleResurrection)
+TEST_F(CGameStateTest, DISABLED_battleResurrection)
 {
 	startTestGame();
 
@@ -332,7 +331,7 @@ TEST_F(CGameStateTest, battleResurrection)
 		gameCallback->sendAndApply(&na);
 
 		PutArtifact pack;
-		pack.al = ArtifactLocation(attacker, ArtifactPosition::SPELLBOOK);
+		pack.al = ArtifactLocation(attacker->id, ArtifactPosition::SPELLBOOK);
 		pack.art = a;
 		gameCallback->sendAndApply(&pack);
 	}

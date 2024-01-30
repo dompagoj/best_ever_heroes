@@ -19,6 +19,9 @@ class CPrologEpilogVideo : public CWindowObject
 	CampaignScenarioPrologEpilog spe;
 	int positionCounter;
 	int voiceSoundHandle;
+	uint32_t voiceDurationMilliseconds;
+	uint32_t elapsedTimeMilliseconds;
+	int videoSoundHandle;
 	std::function<void()> exitCb;
 
 	std::shared_ptr<CMultiLineLabel> text;
@@ -28,6 +31,7 @@ class CPrologEpilogVideo : public CWindowObject
 public:
 	CPrologEpilogVideo(CampaignScenarioPrologEpilog _spe, std::function<void()> callback);
 
+	void tick(uint32_t msPassed) override;
 	void clickPressed(const Point & cursorPosition) override;
 	void show(Canvas & to) override;
 };

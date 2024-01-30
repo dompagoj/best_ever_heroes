@@ -16,7 +16,8 @@
 #include "../campaign/CampaignState.h"
 #include "../mapping/CMapEditManager.h"
 #include "../mapObjects/CGHeroInstance.h"
-#include "../registerTypes/RegisterTypes.h"
+#include "../mapObjects/CGTownInstance.h"
+#include "../networkPacks/ArtifactLocation.h"
 #include "../mapObjectConstructors/AObjectTypeHandler.h"
 #include "../mapObjectConstructors/CObjectClassesHandler.h"
 #include "../StartInfo.h"
@@ -54,7 +55,7 @@ std::optional<CampaignScenarioID> CGameStateCampaign::getHeroesSourceScenario() 
 	auto bonus = currentBonus();
 
 	if(bonus && bonus->type == CampaignBonusType::HEROES_FROM_PREVIOUS_SCENARIO)
-		return static_cast<CampaignScenarioID>(bonus->info2);;
+		return static_cast<CampaignScenarioID>(bonus->info2);
 
 	return campaignState->lastScenario();
 }
@@ -84,13 +85,13 @@ void CGameStateCampaign::trimCrossoverHeroesParameters(std::vector<CampaignHeroR
 		//trimming prim skills
 		for(CGHeroInstance * cgh : crossoverHeroes)
 		{
-			for(int g=0; g<GameConstants::PRIMARY_SKILLS; ++g)
+			for(auto g = PrimarySkill::BEGIN; g < PrimarySkill::END; ++g)
 			{
 				auto sel = Selector::type()(BonusType::PRIMARY_SKILL)
-					.And(Selector::subtype()(g))
+					.And(Selector::subtype()(BonusSubtypeID(g)))
 					.And(Selector::sourceType()(BonusSource::HERO_BASE_SKILL));
 
-				cgh->getBonusLocalFirst(sel)->val = cgh->type->heroClass->primarySkillInitial[g];
+				cgh->getLocalBonus(sel)->val = cgh->type->heroClass->primarySkillInitial[g.getNum()];
 			}
 		}
 	}
@@ -118,7 +119,7 @@ void CGameStateCampaign::trimCrossoverHeroesParameters(std::vector<CampaignHeroR
 		//trimming artifacts
 		for(CGHeroInstance * hero : crossoverHeroes)
 		{
-			auto const & checkAndRemoveArtifact = [&](const ArtifactPosition & artifactPosition )
+			const auto & checkAndRemoveArtifact = [&](const ArtifactPosition & artifactPosition)
 			{
 				if(artifactPosition == ArtifactPosition::SPELLBOOK)
 					return; // do not handle spellbook this way
@@ -134,14 +135,14 @@ void CGameStateCampaign::trimCrossoverHeroesParameters(std::vector<CampaignHeroR
 
 				bool takeable = travelOptions.artifactsKeptByHero.count(art->artType->getId());
 
-				ArtifactLocation al(hero, artifactPosition);
-				if(!takeable  &&  !al.getSlot()->locked)  //don't try removing locked artifacts -> it crashes #1719
-					al.removeArtifact();
+				ArtifactLocation al(hero->id, artifactPosition);
+				if(!takeable && !hero->getSlot(al.slot)->locked)  //don't try removing locked artifacts -> it crashes #1719
+					hero->getArt(al.slot)->removeFrom(*hero, al.slot);
 			};
 
 			// process on copy - removal of artifact will invalidate container
 			auto artifactsWorn = hero->artifactsWorn;
-			for (auto const & art : artifactsWorn)
+			for(const auto & art : artifactsWorn)
 				checkAndRemoveArtifact(art.first);
 
 			// process in reverse - removal of artifact will shift all artifacts after this one
@@ -189,8 +190,8 @@ void CGameStateCampaign::placeCampaignHeroes()
 		auto it = gameState->scenarioOps->playerInfos.find(playerColor);
 		if(it != gameState->scenarioOps->playerInfos.end())
 		{
-			auto heroTypeId = campaignBonus->info2;
-			if(heroTypeId == 0xffff) // random bonus hero
+			HeroTypeID heroTypeId = HeroTypeID(campaignBonus->info2);
+			if(heroTypeId.getNum() == 0xffff) // random bonus hero
 			{
 				heroTypeId = gameState->pickUnusedHeroTypeRandomly(playerColor);
 			}
@@ -210,10 +211,18 @@ void CGameStateCampaign::placeCampaignHeroes()
 	// with the same hero type id
 	std::vector<CGHeroInstance *> removedHeroes;
 
-	std::set<HeroTypeID> heroesToRemove = campaignState->getReservedHeroes();
+	std::set<HeroTypeID> reservedHeroes = campaignState->getReservedHeroes();
+	std::set<HeroTypeID> heroesToRemove;
+
+	for (auto const & heroID : reservedHeroes )
+	{
+		// Do not replace reserved heroes initially, e.g. in 1st campaign scenario in which they appear
+		if (!campaignState->getHeroByType(heroID).isNull())
+			heroesToRemove.insert(heroID);
+	}
 
 	for(auto & campaignHeroReplacement : campaignHeroReplacements)
-		heroesToRemove.insert(HeroTypeID(campaignHeroReplacement.hero->subID));
+		heroesToRemove.insert(campaignHeroReplacement.hero->getHeroType());
 
 	for(auto & heroID : heroesToRemove)
 	{
@@ -233,7 +242,7 @@ void CGameStateCampaign::placeCampaignHeroes()
 	// now add removed heroes again with unused type ID
 	for(auto * hero : removedHeroes)
 	{
-		si32 heroTypeId = 0;
+		HeroTypeID heroTypeId;
 		if(hero->ID == Obj::HERO)
 		{
 			heroTypeId = gameState->pickUnusedHeroTypeRandomly(hero->tempOwner);
@@ -243,7 +252,7 @@ void CGameStateCampaign::placeCampaignHeroes()
 			auto unusedHeroTypeIds = gameState->getUnusedAllowedHeroes();
 			if(!unusedHeroTypeIds.empty())
 			{
-				heroTypeId = (*RandomGeneratorUtil::nextItem(unusedHeroTypeIds, gameState->getRandomGenerator())).getNum();
+				heroTypeId = (*RandomGeneratorUtil::nextItem(unusedHeroTypeIds, gameState->getRandomGenerator()));
 			}
 			else
 			{
@@ -256,8 +265,7 @@ void CGameStateCampaign::placeCampaignHeroes()
 			assert(0); // should not happen
 		}
 
-		hero->subID = heroTypeId;
-		hero->portrait = hero->subID;
+		hero->setHeroType(heroTypeId);
 		gameState->map->getEditManager()->insertObject(hero);
 	}
 }
@@ -301,7 +309,7 @@ void CGameStateCampaign::giveCampaignBonusToHero(CGHeroInstance * hero)
 			CArtifactInstance * scroll = ArtifactUtils::createScroll(SpellID(curBonus->info2));
 			const auto slot = ArtifactUtils::getArtAnyPosition(hero, scroll->getTypeId());
 			if(ArtifactUtils::isSlotEquipment(slot) || ArtifactUtils::isSlotBackpack(slot))
-				scroll->putAt(ArtifactLocation(hero, slot));
+				scroll->putAt(*hero, slot);
 			else
 				logGlobal->error("Cannot give starting scroll - no free slots!");
 			break;
@@ -309,16 +317,14 @@ void CGameStateCampaign::giveCampaignBonusToHero(CGHeroInstance * hero)
 		case CampaignBonusType::PRIMARY_SKILL:
 		{
 			const ui8 * ptr = reinterpret_cast<const ui8 *>(&curBonus->info2);
-			for(int g = 0; g < GameConstants::PRIMARY_SKILLS; ++g)
+			for(auto g = PrimarySkill::BEGIN; g < PrimarySkill::END; ++g)
 			{
-				int val = ptr[g];
+				int val = ptr[g.getNum()];
 				if(val == 0)
-				{
 					continue;
-				}
-				auto bb = std::make_shared<Bonus>(
-					BonusDuration::PERMANENT, BonusType::PRIMARY_SKILL, BonusSource::CAMPAIGN_BONUS, val, static_cast<int>(*gameState->scenarioOps->campState->currentScenario()), g
-				);
+
+				auto currentScenario = *gameState->scenarioOps->campState->currentScenario();
+				auto bb = std::make_shared<Bonus>( BonusDuration::PERMANENT, BonusType::PRIMARY_SKILL, BonusSource::CAMPAIGN_BONUS, val, BonusSourceID(currentScenario), BonusSubtypeID(g) );
 				hero->addNewBonus(bb);
 			}
 			break;
@@ -339,9 +345,10 @@ void CGameStateCampaign::replaceHeroesPlaceholders(const std::vector<CampaignHer
 
 		CGHeroInstance *heroToPlace = campaignHeroReplacement.hero;
 		heroToPlace->id = campaignHeroReplacement.heroPlaceholderId;
-		heroToPlace->tempOwner = heroPlaceholder->tempOwner;
+		if(heroPlaceholder->tempOwner.isValidPlayer())
+			heroToPlace->tempOwner = heroPlaceholder->tempOwner;
 		heroToPlace->pos = heroPlaceholder->pos;
-		heroToPlace->type = VLC->heroh->objects[heroToPlace->subID];
+		heroToPlace->type = heroToPlace->getHeroType().toHeroType();
 		heroToPlace->appearance = VLC->objtypeh->getHandlerFor(Obj::HERO, heroToPlace->type->heroClass->getIndex())->getTemplates().front();
 
 		gameState->map->removeBlockVisTiles(heroPlaceholder, true);
@@ -377,7 +384,7 @@ std::vector<CampaignHeroReplacement> CGameStateCampaign::generateCampaignHeroesT
 		auto * heroPlaceholder = dynamic_cast<CGHeroPlaceholder *>(obj.get());
 
 		// only 1 field must be set
-		assert(heroPlaceholder->powerRank != heroPlaceholder->heroType);
+		assert(heroPlaceholder->powerRank.has_value() != heroPlaceholder->heroType.has_value());
 
 		if(heroPlaceholder->powerRank)
 			placeholdersByPower.push_back(heroPlaceholder);
@@ -387,18 +394,18 @@ std::vector<CampaignHeroReplacement> CGameStateCampaign::generateCampaignHeroesT
 	}
 
 	//selecting heroes by type
-	for (auto const * placeholder : placeholdersByType)
+	for(const auto * placeholder : placeholdersByType)
 	{
-		auto const & node = campaignState->getHeroByType(*placeholder->heroType);
+		const auto & node = campaignState->getHeroByType(*placeholder->heroType);
 		if (node.isNull())
 		{
 			logGlobal->info("Hero crossover: Unable to replace placeholder for %d (%s)!", placeholder->heroType->getNum(), VLC->heroTypes()->getById(*placeholder->heroType)->getNameTranslated());
 			continue;
 		}
 
-		CGHeroInstance * hero = CampaignState::crossoverDeserialize(node, gameState->map);
+		CGHeroInstance * hero = campaignState->crossoverDeserialize(node, gameState->map);
 
-		logGlobal->info("Hero crossover: Loading placeholder for %d (%s)", hero->subID, hero->getNameTranslated());
+		logGlobal->info("Hero crossover: Loading placeholder for %d (%s)", hero->getHeroType(), hero->getNameTranslated());
 
 		campaignHeroReplacements.emplace_back(hero, placeholder->id);
 	}
@@ -413,18 +420,18 @@ std::vector<CampaignHeroReplacement> CGameStateCampaign::generateCampaignHeroesT
 			return *a->powerRank > *b->powerRank;
 		});
 
-		auto const & nodeList = campaignState->getHeroesByPower(lastScenario.value());
+		const auto & nodeList = campaignState->getHeroesByPower(lastScenario.value());
 		auto nodeListIter = nodeList.begin();
 
-		for (auto const * placeholder : placeholdersByPower)
+		for(const auto * placeholder : placeholdersByPower)
 		{
 			if (nodeListIter == nodeList.end())
 				break;
 
-			CGHeroInstance * hero = CampaignState::crossoverDeserialize(*nodeListIter, gameState->map);
+			CGHeroInstance * hero = campaignState->crossoverDeserialize(*nodeListIter, gameState->map);
 			nodeListIter++;
 
-			logGlobal->info("Hero crossover: Loading placeholder as %d (%s)", hero->subID, hero->getNameTranslated());
+			logGlobal->info("Hero crossover: Loading placeholder as %d (%s)", hero->getHeroType(), hero->getNameTranslated());
 
 			campaignHeroReplacements.emplace_back(hero, placeholder->id);
 		}
@@ -470,7 +477,7 @@ void CGameStateCampaign::initHeroes()
 		{
 			for (auto & heroe : heroes)
 			{
-				if (heroe->subID == chosenBonus->info1)
+				if (heroe->getHeroType().getNum() == chosenBonus->info1)
 				{
 					giveCampaignBonusToHero(heroe);
 					break;
@@ -500,7 +507,7 @@ void CGameStateCampaign::initStartingResources()
 		std::vector<const PlayerSettings *> people = getHumanPlayerInfo(); //players we will give resource bonus
 		for(const PlayerSettings *ps : people)
 		{
-			std::vector<int> res; //resources we will give
+			std::vector<GameResID> res; //resources we will give
 			switch (chosenBonus->info1)
 			{
 				case 0: case 1: case 2: case 3: case 4: case 5: case 6:
@@ -559,7 +566,7 @@ void CGameStateCampaign::initTowns()
 		if(gameState->scenarioOps->campState->formatVCMI())
 			newBuilding = BuildingID(chosenBonus->info1);
 		else
-			newBuilding = CBuildingHandler::campToERMU(chosenBonus->info1, town->subID, town->builtBuildings);
+			newBuilding = CBuildingHandler::campToERMU(chosenBonus->info1, town->getFaction(), town->builtBuildings);
 
 		// Build granted building & all prerequisites - e.g. Mages Guild Lvl 3 should also give Mages Guild Lvl 1 & 2
 		while(true)
@@ -593,7 +600,7 @@ bool CGameStateCampaign::playerHasStartingHero(PlayerColor playerColor) const
 
 std::unique_ptr<CMap> CGameStateCampaign::getCurrentMap() const
 {
-	return gameState->scenarioOps->campState->getMap(CampaignScenarioID::NONE);
+	return gameState->scenarioOps->campState->getMap(CampaignScenarioID::NONE, gameState->callback);
 }
 
 VCMI_LIB_NAMESPACE_END

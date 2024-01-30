@@ -8,14 +8,16 @@
  *
  */
 #include "StdInc.h"
-
 #include "CLobbyScreen.h"
-#include "CBonusSelection.h"
-#include "SelectionTab.h"
-#include "RandomMapTab.h"
-#include "OptionsTab.h"
-#include "../CServerHandler.h"
 
+#include "CBonusSelection.h"
+#include "TurnOptionsTab.h"
+#include "ExtraOptionsTab.h"
+#include "OptionsTab.h"
+#include "RandomMapTab.h"
+#include "SelectionTab.h"
+
+#include "../CServerHandler.h"
 #include "../gui/CGuiHandler.h"
 #include "../gui/Shortcut.h"
 #include "../widgets/Buttons.h"
@@ -24,12 +26,13 @@
 
 #include "../../CCallback.h"
 
-#include "../CGameInfo.h"
-#include "../../lib/NetPacksLobby.h"
+#include "../../lib/CConfigHandler.h"
 #include "../../lib/CGeneralTextHandler.h"
 #include "../../lib/campaign/CampaignHandler.h"
 #include "../../lib/mapping/CMapInfo.h"
+#include "../../lib/networkPacks/PacksForLobby.h"
 #include "../../lib/rmg/CMapGenOptions.h"
+#include "../CGameInfo.h"
 
 CLobbyScreen::CLobbyScreen(ESelectionScreen screenType)
 	: CSelectionBase(screenType), bonusSel(nullptr)
@@ -50,6 +53,11 @@ CLobbyScreen::CLobbyScreen(ESelectionScreen screenType)
 		});
 
 		buttonOptions = std::make_shared<CButton>(Point(411, 510), AnimationPath::builtin("GSPBUTT.DEF"), CGI->generaltexth->zelp[46], std::bind(&CLobbyScreen::toggleTab, this, tabOpt), EShortcut::LOBBY_ADDITIONAL_OPTIONS);
+		if(settings["general"]["enableUiEnhancements"].Bool())
+		{
+			buttonTurnOptions = std::make_shared<CButton>(Point(619, 105), AnimationPath::builtin("GSPBUT2.DEF"), CGI->generaltexth->zelp[46], std::bind(&CLobbyScreen::toggleTab, this, tabTurnOptions), EShortcut::NONE);
+			buttonExtraOptions = std::make_shared<CButton>(Point(619, 510), AnimationPath::builtin("GSPBUT2.DEF"), CGI->generaltexth->zelp[46], std::bind(&CLobbyScreen::toggleTab, this, tabExtraOptions), EShortcut::NONE);
+		}
 	};
 
 	buttonChat = std::make_shared<CButton>(Point(619, 80), AnimationPath::builtin("GSPBUT2.DEF"), CGI->generaltexth->zelp[48], std::bind(&CLobbyScreen::toggleChat, this), EShortcut::LOBBY_HIDE_CHAT);
@@ -60,6 +68,8 @@ CLobbyScreen::CLobbyScreen(ESelectionScreen screenType)
 	case ESelectionScreen::newGame:
 	{
 		tabOpt = std::make_shared<OptionsTab>();
+		tabTurnOptions = std::make_shared<TurnOptionsTab>();
+		tabExtraOptions = std::make_shared<ExtraOptionsTab>();
 		tabRand = std::make_shared<RandomMapTab>();
 		tabRand->mapInfoChanged += std::bind(&IServerAPI::setMapInfo, CSH, _1, _2);
 		buttonRMG = std::make_shared<CButton>(Point(411, 105), AnimationPath::builtin("GSPBUTT.DEF"), CGI->generaltexth->zelp[47], 0, EShortcut::LOBBY_RANDOM_MAP);
@@ -71,14 +81,16 @@ CLobbyScreen::CLobbyScreen(ESelectionScreen screenType)
 
 		card->iconDifficulty->addCallback(std::bind(&IServerAPI::setDifficulty, CSH, _1));
 
-		buttonStart = std::make_shared<CButton>(Point(411, 535), AnimationPath::builtin("SCNRBEG.DEF"), CGI->generaltexth->zelp[103], std::bind(&CLobbyScreen::startScenario, this, true), EShortcut::LOBBY_BEGIN_GAME);
+		buttonStart = std::make_shared<CButton>(Point(411, 535), AnimationPath::builtin("SCNRBEG.DEF"), CGI->generaltexth->zelp[103], std::bind(&CLobbyScreen::startScenario, this, false), EShortcut::LOBBY_BEGIN_GAME);
 		initLobby();
 		break;
 	}
 	case ESelectionScreen::loadGame:
 	{
 		tabOpt = std::make_shared<OptionsTab>();
-		buttonStart = std::make_shared<CButton>(Point(411, 535), AnimationPath::builtin("SCNRLOD.DEF"), CGI->generaltexth->zelp[103], std::bind(&CLobbyScreen::startScenario, this, true), EShortcut::LOBBY_LOAD_GAME);
+		tabTurnOptions = std::make_shared<TurnOptionsTab>();
+		tabExtraOptions = std::make_shared<ExtraOptionsTab>();
+		buttonStart = std::make_shared<CButton>(Point(411, 535), AnimationPath::builtin("SCNRLOD.DEF"), CGI->generaltexth->zelp[103], std::bind(&CLobbyScreen::startScenario, this, false), EShortcut::LOBBY_LOAD_GAME);
 		initLobby();
 		break;
 	}
@@ -114,15 +126,31 @@ void CLobbyScreen::toggleTab(std::shared_ptr<CIntObject> tab)
 		CSH->sendGuiAction(LobbyGuiAction::OPEN_SCENARIO_LIST);
 	else if(tab == tabRand)
 		CSH->sendGuiAction(LobbyGuiAction::OPEN_RANDOM_MAP_OPTIONS);
+	else if(tab == tabTurnOptions)
+		CSH->sendGuiAction(LobbyGuiAction::OPEN_TURN_OPTIONS);
+	else if(tab == tabExtraOptions)
+		CSH->sendGuiAction(LobbyGuiAction::OPEN_EXTRA_OPTIONS);
 	CSelectionBase::toggleTab(tab);
 }
 
 void CLobbyScreen::startCampaign()
 {
-	if(CSH->mi)
-	{
+	if(!CSH->mi)
+		return;
+
+	try {
 		auto ourCampaign = CampaignHandler::getCampaign(CSH->mi->fileURI);
 		CSH->setCampaignState(ourCampaign);
+	}
+	catch (const std::runtime_error &e)
+	{
+		// handle possible exception on map loading. For example campaign that contains map in unsupported format
+		// for example, wog campaigns or hota campaigns without hota map support mod
+		MetaString message;
+		message.appendTextID("vcmi.client.errors.invalidMap");
+		message.replaceRawString(e.what());
+
+		CInfoWindow::showInfoDialog(message.toString(), {});
 	}
 }
 
@@ -145,6 +173,13 @@ void CLobbyScreen::toggleMode(bool host)
 	auto buttonColor = host ? Colors::WHITE : Colors::ORANGE;
 	buttonSelect->addTextOverlay(CGI->generaltexth->allTexts[500], FONT_SMALL, buttonColor);
 	buttonOptions->addTextOverlay(CGI->generaltexth->allTexts[501], FONT_SMALL, buttonColor);
+
+	if (buttonTurnOptions)
+		buttonTurnOptions->addTextOverlay(CGI->generaltexth->translate("vcmi.optionsTab.turnOptions.hover"), FONT_SMALL, buttonColor);
+
+	if (buttonExtraOptions)
+		buttonExtraOptions->addTextOverlay(CGI->generaltexth->translate("vcmi.optionsTab.extraOptions.hover"), FONT_SMALL, buttonColor);
+
 	if(buttonRMG)
 	{
 		buttonRMG->addTextOverlay(CGI->generaltexth->allTexts[740], FONT_SMALL, buttonColor);
@@ -153,8 +188,18 @@ void CLobbyScreen::toggleMode(bool host)
 	buttonSelect->block(!host);
 	buttonOptions->block(!host);
 
+	if (buttonTurnOptions)
+		buttonTurnOptions->block(!host);
+
+	if (buttonExtraOptions)
+		buttonExtraOptions->block(!host);
+
 	if(CSH->mi)
+	{
 		tabOpt->recreate();
+		tabTurnOptions->recreate();
+		tabExtraOptions->recreate();
+	}
 }
 
 void CLobbyScreen::toggleChat()
@@ -168,8 +213,15 @@ void CLobbyScreen::toggleChat()
 
 void CLobbyScreen::updateAfterStateChange()
 {
-	if(CSH->mi && tabOpt)
-		tabOpt->recreate();
+	if(CSH->mi)
+	{
+		if (tabOpt)
+			tabOpt->recreate();
+		if (tabTurnOptions)
+			tabTurnOptions->recreate();
+		if (tabExtraOptions)
+			tabExtraOptions->recreate();
+	}
 
 	buttonStart->block(CSH->mi == nullptr || CSH->isGuest());
 

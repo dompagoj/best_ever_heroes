@@ -33,6 +33,7 @@
 #include "../../lib/GameSettings.h"
 #include "../../lib/CHeroHandler.h"
 #include "../../lib/gameState/CGameState.h"
+#include "../../lib/networkPacks/ArtifactLocation.h"
 #include "../../lib/TextOperations.h"
 
 class CCreatureArtifactInstance;
@@ -208,10 +209,10 @@ CStackWindow::ActiveSpellsSection::ActiveSpellsSection(CStackWindow * owner, int
 
 	//spell effects
 	int printed=0; //how many effect pics have been printed
-	std::vector<si32> spells = battleStack->activeSpells();
-	for(si32 effect : spells)
+	std::vector<SpellID> spells = battleStack->activeSpells();
+	for(SpellID effect : spells)
 	{
-		const spells::Spell * spell = CGI->spells()->getByIndex(effect);
+		const spells::Spell * spell = CGI->spells()->getById(effect);
 
 		std::string spellText;
 
@@ -224,10 +225,11 @@ CStackWindow::ActiveSpellsSection::ActiveSpellsSection(CStackWindow * owner, int
 			spellText = CGI->generaltexth->allTexts[610]; //"%s, duration: %d rounds."
 			boost::replace_first(spellText, "%s", spell->getNameTranslated());
 			//FIXME: support permanent duration
-			int duration = battleStack->getBonusLocalFirst(Selector::source(BonusSource::SPELL_EFFECT,effect))->turnsRemain;
+			int duration = battleStack->getFirstBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(effect)))->turnsRemain;
 			boost::replace_first(spellText, "%d", std::to_string(duration));
 
 			spellIcons.push_back(std::make_shared<CAnimImage>(AnimationPath::builtin("SpellInt"), effect + 1, 0, firstPos.x + offset.x * printed, firstPos.y + offset.y * printed));
+			labels.push_back(std::make_shared<CLabel>(firstPos.x + offset.x * printed + 46, firstPos.y + offset.y * printed + 36, EFonts::FONT_TINY, ETextAlignment::BOTTOMRIGHT, Colors::WHITE, std::to_string(duration)));
 			clickableAreas.push_back(std::make_shared<LRClickableAreaWText>(Rect(firstPos + offset * printed, Point(50, 38)), spellText, spellText));
 			if(++printed >= 8) // interface limit reached
 				break;
@@ -324,7 +326,7 @@ CStackWindow::ButtonsSection::ButtonsSection(CStackWindow * owner, int yOffset)
 				std::vector<std::shared_ptr<CComponent>> resComps;
 				for(TResources::nziterator i(totalCost); i.valid(); i++)
 				{
-					resComps.push_back(std::make_shared<CComponent>(CComponent::resource, i->resType, (int)i->resVal));
+					resComps.push_back(std::make_shared<CComponent>(ComponentType::RESOURCE, i->resType, i->resVal));
 				}
 
 				if(LOCPLINT->cb->getResourceAmount().canAfford(totalCost))
@@ -541,7 +543,7 @@ CStackWindow::MainSection::MainSection(CStackWindow * owner, int yOffset, bool s
 		addStatLabel(EStat::DEFENCE, parent->info->creature->getDefense(battleStack->isShooter()), battleStack->getDefense(battleStack->isShooter()));
 		addStatLabel(EStat::DAMAGE, parent->info->stackNode->getMinDamage(battleStack->isShooter()) * dmgMultiply, battleStack->getMaxDamage(battleStack->isShooter()) * dmgMultiply);
 		addStatLabel(EStat::HEALTH, parent->info->creature->getMaxHealth(), battleStack->getMaxHealth());
-		addStatLabel(EStat::SPEED, parent->info->creature->speed(), battleStack->speed());
+		addStatLabel(EStat::SPEED, parent->info->creature->getMovementRange(), battleStack->getMovementRange());
 
 		if(battleStack->isShooter())
 			addStatLabel(EStat::SHOTS, battleStack->shots.total(), battleStack->shots.available());
@@ -561,7 +563,7 @@ CStackWindow::MainSection::MainSection(CStackWindow * owner, int yOffset, bool s
 		addStatLabel(EStat::DEFENCE, parent->info->creature->getDefense(shooter), parent->info->stackNode->getDefense(shooter));
 		addStatLabel(EStat::DAMAGE, parent->info->stackNode->getMinDamage(shooter) * dmgMultiply, parent->info->stackNode->getMaxDamage(shooter) * dmgMultiply);
 		addStatLabel(EStat::HEALTH, parent->info->creature->getMaxHealth(), parent->info->stackNode->getMaxHealth());
-		addStatLabel(EStat::SPEED, parent->info->creature->speed(), parent->info->stackNode->speed());
+		addStatLabel(EStat::SPEED, parent->info->creature->getMovementRange(), parent->info->stackNode->getMovementRange());
 
 		if(shooter)
 			addStatLabel(EStat::SHOTS, parent->info->stackNode->valOfBonuses(BonusType::SHOTS));
@@ -581,10 +583,10 @@ CStackWindow::MainSection::MainSection(CStackWindow * owner, int yOffset, bool s
 			const CCommanderInstance * commander = parent->info->commander;
 			expRankIcon = std::make_shared<CAnimImage>(AnimationPath::builtin("PSKIL42"), 4, 0, pos.x, pos.y);
 
-			auto area = std::make_shared<LRClickableAreaWTextComp>(Rect(pos.x, pos.y, 44, 44), CComponent::experience);
+			auto area = std::make_shared<LRClickableAreaWTextComp>(Rect(pos.x, pos.y, 44, 44), ComponentType::EXPERIENCE);
 			expArea = area;
 			area->text = CGI->generaltexth->allTexts[2];
-			area->bonusValue =	commander->getExpRank();
+			area->component.value = commander->getExpRank();
 			boost::replace_first(area->text, "%d", std::to_string(commander->getExpRank()));
 			boost::replace_first(area->text, "%d", std::to_string(CGI->heroh->reqExp(commander->getExpRank() + 1)));
 			boost::replace_first(area->text, "%d", std::to_string(commander->experience));
@@ -610,8 +612,8 @@ CStackWindow::MainSection::MainSection(CStackWindow * owner, int yOffset, bool s
 		if(art)
 		{
 			parent->stackArtifactIcon = std::make_shared<CAnimImage>(AnimationPath::builtin("ARTIFACT"), art->artType->getIconIndex(), 0, pos.x, pos.y);
-			parent->stackArtifactHelp = std::make_shared<LRClickableAreaWTextComp>(Rect(pos, Point(44, 44)), CComponent::artifact);
-			parent->stackArtifactHelp->type = art->artType->getId();
+			parent->stackArtifactHelp = std::make_shared<LRClickableAreaWTextComp>(Rect(pos, Point(44, 44)), ComponentType::ARTIFACT);
+			parent->stackArtifactHelp->component.subType = art->artType->getId();
 
 			if(parent->info->owner)
 			{
@@ -664,6 +666,7 @@ CStackWindow::CStackWindow(const CStack * stack, bool popup)
 {
 	info->stack = stack;
 	info->stackNode = stack->base;
+	info->commander = dynamic_cast<const CCommanderInstance*>(stack->base);
 	info->creature = stack->unitType();
 	info->creatureCount = stack->getCount();
 	info->popupWindow = popup;
@@ -762,7 +765,8 @@ void CStackWindow::init()
 
 void CStackWindow::initBonusesList()
 {
-	BonusList output, input;
+	BonusList output;
+	BonusList input;
 	input = *(info->stackNode->getBonuses(CSelector(Bonus::Permanent), Selector::all));
 
 	while(!input.empty())
@@ -973,11 +977,12 @@ void CStackWindow::removeStackArtifact(ArtifactPosition pos)
 	const auto slot = ArtifactUtils::getArtBackpackPosition(info->owner, art->getTypeId());
 	if(slot != ArtifactPosition::PRE_FIRST)
 	{
-		LOCPLINT->cb->swapArtifacts(ArtifactLocation(info->stackNode, pos), ArtifactLocation(info->owner, slot));
+		auto artLoc = ArtifactLocation(info->owner->id, pos);
+		artLoc.creature = info->stackNode->armyObj->findStack(info->stackNode);
+		LOCPLINT->cb->swapArtifacts(artLoc, ArtifactLocation(info->owner->id, slot));
 		stackArtifactButton.reset();
 		stackArtifactHelp.reset();
 		stackArtifactIcon.reset();
 		redraw();
 	}
 }
-

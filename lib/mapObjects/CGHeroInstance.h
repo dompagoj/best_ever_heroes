@@ -25,21 +25,26 @@ struct TerrainTile;
 struct TurnInfo;
 enum class EHeroGender : uint8_t;
 
-class CGHeroPlaceholder : public CGObjectInstance
+class DLL_LINKAGE CGHeroPlaceholder : public CGObjectInstance
 {
 public:
+	using CGObjectInstance::CGObjectInstance;
+
 	/// if this is placeholder by power, then power rank of desired hero
 	std::optional<ui8> powerRank;
 
 	/// if this is placeholder by type, then hero type of desired hero
 	std::optional<HeroTypeID> heroType;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGObjectInstance&>(*this);
 		h & powerRank;
 		h & heroType;
 	}
+	
+protected:
+	void serializeJsonOptions(JsonSerializeFormat & handler) override;
 };
 
 
@@ -66,26 +71,27 @@ public:
 
 	//////////////////////////////////////////////////////////////////////////
 
-	ConstTransitivePtr<CHero> type;
+	const CHero * type;
 	TExpType exp; //experience points
 	ui32 level; //current level of hero
-	si32 portrait; //may be custom
+
+	/// If not NONE - then hero should use portrait from referenced hero type
+	HeroTypeID customPortraitSource;
 	si32 mana; // remaining spell points
 	std::vector<std::pair<SecondarySkill,ui8> > secSkills; //first - ID of skill, second - level of skill (1 - basic, 2 - adv., 3 - expert); if hero has ability (-1, -1) it meansthat it should have default secondary abilities
 	EHeroGender gender;
 
-	std::string nameCustom;
-	std::string biographyCustom;
+	std::string nameCustomTextId;
+	std::string biographyCustomTextId;
 
 	bool inTownGarrison; // if hero is in town garrison
 	ConstTransitivePtr<CGTownInstance> visitedTown; //set if hero is visiting town or in the town garrison
 	ConstTransitivePtr<CCommanderInstance> commander;
 	const CGBoat * boat = nullptr; //set to CGBoat when sailing
 
-	static constexpr si32 UNINITIALIZED_PORTRAIT = -1;
 	static constexpr si32 UNINITIALIZED_MANA = -1;
 	static constexpr ui32 UNINITIALIZED_MOVEMENT = -1;
-	static constexpr TExpType UNINITIALIZED_EXPERIENCE = std::numeric_limits<TExpType>::max();
+	static constexpr auto UNINITIALIZED_EXPERIENCE = std::numeric_limits<TExpType>::max();
 
 	//std::vector<const CArtifact*> artifacts; //hero's artifacts from bag
 	//std::map<ui16, const CArtifact*> artifWorn; //map<position,artifact_id>; positions: 0 - head; 1 - shoulders; 2 - neck; 3 - right hand; 4 - left hand; 5 - torso; 6 - right ring; 7 - left ring; 8 - feet; 9 - misc1; 10 - misc2; 11 - misc3; 12 - misc4; 13 - mach1; 14 - mach2; 15 - mach3; 16 - mach4; 17 - spellbook; 18 - misc5
@@ -97,7 +103,7 @@ public:
 		bool patrolling;
 		int3 initialPos;
 		ui32 patrolRadius;
-		template <typename Handler> void serialize(Handler &h, const int version)
+		template <typename Handler> void serialize(Handler &h)
 		{
 			h & patrolling;
 			h & initialPos;
@@ -107,9 +113,6 @@ public:
 
 	struct DLL_LINKAGE SecondarySkillsInfo
 	{
-		//skills are determined, initialized at map start
-		//FIXME remove mutable
-		mutable CRandomGenerator rand;
 		ui8 magicSchoolCounter;
 		ui8 wisdomCounter;
 
@@ -118,11 +121,10 @@ public:
 		void resetMagicSchoolCounter();
 		void resetWisdomCounter();
 
-		template <typename Handler> void serialize(Handler &h, const int version)
+		template <typename Handler> void serialize(Handler &h)
 		{
 			h & magicSchoolCounter;
 			h & wisdomCounter;
-			h & rand;
 		}
 	} skillsInfo;
 
@@ -143,6 +145,9 @@ public:
 
 	std::string getBiographyTranslated() const;
 	std::string getNameTranslated() const;
+
+	HeroTypeID getPortraitSource() const;
+	int32_t getIconIndex() const;
 
 private:
 	std::string getNameTextID() const;
@@ -168,7 +173,7 @@ public:
 	int getCurrentLuck(int stack=-1, bool town=false) const;
 	int32_t getSpellCost(const spells::Spell * sp) const; //do not use during battles -> bonuses from army would be ignored
 
-	bool canLearnSpell(const spells::Spell * spell) const;
+	bool canLearnSpell(const spells::Spell * spell,  bool allowBanned = false) const;
 	bool canCastThisSpell(const spells::Spell * spell) const; //determines if this hero can cast given spell; takes into account existing spell in spellbook, existing spellbook and artifact bonuses
 
 	/// convert given position between map position (CGObjectInstance::pos) and visitable position used for hero interactions
@@ -187,7 +192,7 @@ public:
 	std::optional<SecondarySkill> nextSecondarySkill(CRandomGenerator & rand) const;
 
 	/// Gets 0, 1 or 2 secondary skills which are proposed on hero level up.
-	std::vector<SecondarySkill> getLevelUpProposedSecondarySkills() const;
+	std::vector<SecondarySkill> getLevelUpProposedSecondarySkills(CRandomGenerator & rand) const;
 
 	ui8 getSecSkillLevel(const SecondarySkill & skill) const; //0 - no skill
 
@@ -224,7 +229,8 @@ public:
 
 	//////////////////////////////////////////////////////////////////////////
 
-	void setType(si32 ID, si32 subID) override;
+	HeroTypeID getHeroType() const;
+	void setHeroType(HeroTypeID type);
 
 	void initHero(CRandomGenerator & rand);
 	void initHero(CRandomGenerator & rand, const HeroTypeID & SUBID);
@@ -241,11 +247,11 @@ public:
 
 	void fillUpgradeInfo(UpgradeInfo & info, const CStackInstance &stack) const override;
 
-	bool hasVisions(const CGObjectInstance * target, const int subtype) const;
+	bool hasVisions(const CGObjectInstance * target, BonusSubtypeID masteryLevel) const;
 	/// If this hero perishes, the scenario is failed
 	bool isMissionCritical() const;
 
-	CGHeroInstance();
+	CGHeroInstance(IGameCallback *cb);
 	virtual ~CGHeroInstance();
 
 	PlayerColor getOwner() const override;
@@ -266,7 +272,7 @@ public:
 
 	///spells::Caster
 	int32_t getCasterUnitId() const override;
-	int32_t getSpellSchoolLevel(const spells::Spell * spell, int32_t * outSelectedSchool = nullptr) const override;
+	int32_t getSpellSchoolLevel(const spells::Spell * spell, SpellSchool * outSelectedSchool = nullptr) const override;
 	int64_t getSpellBonus(const spells::Spell * spell, int64_t base, const battle::Unit * affectedStack) const override;
 	int64_t getSpecificSpellBonus(const spells::Spell * spell, int64_t base) const override;
 
@@ -287,6 +293,7 @@ public:
 	void deserializationFix();
 
 	void initObj(CRandomGenerator & rand) override;
+	void pickRandomObject(CRandomGenerator & rand) override;
 	void onHeroVisit(const CGHeroInstance * h) const override;
 	std::string getObjectName() const override;
 
@@ -296,9 +303,10 @@ public:
 	void updateFrom(const JsonNode & data) override;
 
 	bool isCoastVisitable() const override;
+	bool isBlockedVisitable() const override;
 	BattleField getBattlefield() const override;
 protected:
-	void setPropertyDer(ui8 what, ui32 val) override;//synchr
+	void setPropertyDer(ObjProperty what, ObjPropertyID identifier) override;//synchr
 	///common part of hero instance and hero definition
 	void serializeCommonOptions(JsonSerializeFormat & handler);
 
@@ -313,15 +321,15 @@ public:
 
 	void serializeJsonDefinition(JsonSerializeFormat & handler);
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CArmedInstance&>(*this);
 		h & static_cast<CArtifactSet&>(*this);
 		h & exp;
 		h & level;
-		h & nameCustom;
-		h & biographyCustom;
-		h & portrait;
+		h & nameCustomTextId;
+		h & biographyCustomTextId;
+		h & customPortraitSource;
 		h & mana;
 		h & secSkills;
 		h & movement;

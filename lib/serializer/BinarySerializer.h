@@ -9,7 +9,9 @@
  */
 #pragma once
 
+#include "CSerializer.h"
 #include "CTypeList.h"
+#include "ESerializationVersion.h"
 #include "../mapObjects/CArmedInstance.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
@@ -102,23 +104,22 @@ class DLL_LINKAGE BinarySerializer : public CSaverBase
 			const T *ptr = static_cast<const T*>(data);
 
 			//T is most derived known type, it's time to call actual serialize
-			const_cast<T*>(ptr)->serialize(s, SERIALIZATION_VERSION);
+			const_cast<T*>(ptr)->serialize(s);
 		}
 	};
 
 	CApplier<CBasicPointerSaver> applier;
 
 public:
+	using Version = ESerializationVersion;
+
 	std::map<const void*, ui32> savedPointers;
 
+	const Version version = Version::CURRENT;
 	bool smartPointerSerialization;
 	bool saving;
 
-	BinarySerializer(IBinaryWriter * w): CSaverBase(w)
-	{
-		saving=true;
-		smartPointerSerialization = true;
-	}
+	BinarySerializer(IBinaryWriter * w);
 
 	template<typename Base, typename Derived>
 	void registerType(const Base * b = nullptr, const Derived * d = nullptr)
@@ -138,14 +139,6 @@ public:
 	{
 		ui8 writ = static_cast<ui8>(data);
 		save(writ);
-	}
-
-	template < typename T, typename std::enable_if < std::is_same<T, std::vector<bool> >::value, int  >::type = 0 >
-	void save(const T &data)
-	{
-		std::vector<ui8> convData;
-		std::copy(data.begin(), data.end(), std::back_inserter(convData));
-		save(convData);
 	}
 
 	template < class T, typename std::enable_if < std::is_fundamental<T>::value && !std::is_same<T, bool>::value, int  >::type = 0 >
@@ -174,16 +167,30 @@ public:
 	void save(const T &data)
 	{
 		//write if pointer is not nullptr
-		ui8 hlp = (data!=nullptr);
-		save(hlp);
+		bool isNull = (data == nullptr);
+		save(isNull);
 
 		//if pointer is nullptr then we don't need anything more...
-		if(!hlp)
+		if(data == nullptr)
 			return;
+
+		savePointerImpl(data);
+	}
+
+	template < typename T, typename std::enable_if < std::is_base_of_v<Entity, std::remove_pointer_t<T>>, int  >::type = 0 >
+	void savePointerImpl(const T &data)
+	{
+		auto index = data->getId();
+		save(index);
+	}
+
+	template < typename T, typename std::enable_if < !std::is_base_of_v<Entity, std::remove_pointer_t<T>>, int  >::type = 0 >
+	void savePointerImpl(const T &data)
+	{
+		typedef typename std::remove_const<typename std::remove_pointer<T>::type>::type TObjectType;
 
 		if(writer->smartVectorMembersSerialization)
 		{
-			typedef typename std::remove_const<typename std::remove_pointer<T>::type>::type TObjectType;
 			typedef typename VectorizedTypeFor<TObjectType>::type VType;
 			typedef typename VectorizedIDType<TObjectType>::type IDType;
 
@@ -207,7 +214,7 @@ public:
 		{
 			// We might have an object that has multiple inheritance and store it via the non-first base pointer.
 			// Therefore, all pointers need to be normalized to the actual object address.
-			auto actualPointer = typeList.castToMostDerived(data);
+			const void * actualPointer = static_cast<const void*>(data);
 			auto i = savedPointers.find(actualPointer);
 			if(i != savedPointers.end())
 			{
@@ -223,19 +230,24 @@ public:
 		}
 
 		//write type identifier
-		ui16 tid = typeList.getTypeID(data);
+		uint16_t tid = CTypeList::getInstance().getTypeID(data);
 		save(tid);
 
 		if(!tid)
 			save(*data); //if type is unregistered simply write all data in a standard way
 		else
-			applier.getApplier(tid)->savePtr(*this, typeList.castToMostDerived(data));  //call serializer specific for our real type
+			applier.getApplier(tid)->savePtr(*this, static_cast<const void*>(data));  //call serializer specific for our real type
 	}
 
 	template < typename T, typename std::enable_if < is_serializeable<BinarySerializer, T>::value, int  >::type = 0 >
 	void save(const T &data)
 	{
-		const_cast<T&>(data).serialize(*this, SERIALIZATION_VERSION);
+		const_cast<T&>(data).serialize(*this);
+	}
+
+	void save(const std::monostate & data)
+	{
+		// no-op
 	}
 
 	template <typename T>
@@ -357,7 +369,9 @@ public:
 		ui32 length = data.num_elements();
 		*this & length;
 		auto shape = data.shape();
-		ui32 x = shape[0], y = shape[1], z = shape[2];
+		ui32 x = shape[0];
+		ui32 y = shape[1];
+		ui32 z = shape[2];
 		*this & x & y & z;
 		for(ui32 i = 0; i < length; i++)
 			save(data.data()[i]);
@@ -381,32 +395,6 @@ public:
 			auto writ = static_cast<uint64_t>(data.to_ulong());
 			save(writ);
 		}
-	}
-};
-
-class DLL_LINKAGE CSaveFile : public IBinaryWriter
-{
-public:
-	BinarySerializer serializer;
-
-	boost::filesystem::path fName;
-	std::unique_ptr<std::fstream> sfile;
-
-	CSaveFile(const boost::filesystem::path &fname); //throws!
-	~CSaveFile();
-	int write(const void * data, unsigned size) override;
-
-	void openNextFile(const boost::filesystem::path &fname); //throws!
-	void clear();
-	void reportState(vstd::CLoggerBase * out) override;
-
-	void putMagicBytes(const std::string &text);
-
-	template<class T>
-	CSaveFile & operator<<(const T &t)
-	{
-		serializer & t;
-		return * this;
 	}
 };
 

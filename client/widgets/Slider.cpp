@@ -69,6 +69,11 @@ int CSlider::getValue() const
 	return value;
 }
 
+void CSlider::setValue(int to)
+{
+	scrollTo(value);
+}
+
 int CSlider::getCapacity() const
 {
 	return capacity;
@@ -119,7 +124,7 @@ void CSlider::scrollTo(int to)
 
 	updateSliderPos();
 
-	moved(to);
+	moved(getValue());
 }
 
 void CSlider::clickPressed(const Point & cursorPosition)
@@ -151,6 +156,11 @@ void CSlider::clickPressed(const Point & cursorPosition)
 
 bool CSlider::receiveEvent(const Point &position, int eventType) const
 {
+	if (eventType == LCLICK)
+	{
+		return pos.isInside(position) && !left->pos.isInside(position) && !right->pos.isInside(position);
+	}
+
 	if(eventType != WHEEL && eventType != GESTURE)
 	{
 		return CIntObject::receiveEvent(position, eventType);
@@ -164,7 +174,7 @@ bool CSlider::receiveEvent(const Point &position, int eventType) const
 	return testTarget.isInside(position);
 }
 
-CSlider::CSlider(Point position, int totalw, std::function<void(int)> Moved, int Capacity, int Amount, int Value, Orientation orientation, CSlider::EStyle style)
+CSlider::CSlider(Point position, int totalw, const std::function<void(int)> & Moved, int Capacity, int Amount, int Value, Orientation orientation, CSlider::EStyle style)
 	: Scrollable(LCLICK | DRAG, position, orientation ),
 	capacity(Capacity),
 	amount(Amount),
@@ -296,4 +306,32 @@ void CSlider::scrollToMin()
 void CSlider::scrollToMax()
 {
 	scrollTo(amount);
+}
+
+SliderNonlinear::SliderNonlinear(Point position, int length, const std::function<void(int)> & Moved, const std::vector<int> & values, int Value, Orientation orientation, EStyle style)
+	: CSlider(position, length, Moved, 1, values.size(), Value, orientation, style)
+	, scaledValues(values)
+{
+
+}
+
+int SliderNonlinear::getValue() const
+{
+	return scaledValues.at(CSlider::getValue());
+}
+
+void SliderNonlinear::setValue(int to)
+{
+	size_t nearest = 0;
+
+	for(size_t i = 0; i < scaledValues.size(); ++i)
+	{
+		int nearestDistance = std::abs(to - scaledValues[nearest]);
+		int currentDistance = std::abs(to - scaledValues[i]);
+
+		if(currentDistance < nearestDistance)
+			nearest = i;
+	}
+
+	scrollTo(nearest);
 }

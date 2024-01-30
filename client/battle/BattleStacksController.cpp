@@ -26,9 +26,12 @@
 #include "../CMusicHandler.h"
 #include "../CGameInfo.h"
 #include "../gui/CGuiHandler.h"
+#include "../gui/WindowHandler.h"
 #include "../render/Colors.h"
 #include "../render/Canvas.h"
 #include "../render/IRenderHandler.h"
+#include "../render/Graphics.h"
+#include "../render/IFont.h"
 
 #include "../../CCallback.h"
 #include "../../lib/spells/ISpellMechanics.h"
@@ -264,7 +267,7 @@ bool BattleStacksController::stackNeedsAmountBox(const CStack * stack) const
 
 std::shared_ptr<IImage> BattleStacksController::getStackAmountBox(const CStack * stack)
 {
-	std::vector<si32> activeSpells = stack->activeSpells();
+	std::vector<SpellID> activeSpells = stack->activeSpells();
 
 	if ( activeSpells.empty())
 		return amountNormal;
@@ -326,10 +329,10 @@ void BattleStacksController::showStackAmountBox(Canvas & canvas, const CStack * 
 			boxPosition = owner.fieldController->hexPositionLocal(frontPos).center() + Point(-8, -14);
 	}
 
-	Point textPosition = amountBG->dimensions()/2 + boxPosition;
+	Point textPosition = Point(amountBG->dimensions().x/2 + boxPosition.x, boxPosition.y + graphics->fonts[EFonts::FONT_TINY]->getLineHeight() - 6);
 
 	canvas.draw(amountBG, boxPosition);
-	canvas.drawText(textPosition, EFonts::FONT_TINY, Colors::WHITE, ETextAlignment::CENTER, TextOperations::formatMetric(stack->getCount(), 4));
+	canvas.drawText(textPosition, EFonts::FONT_TINY, Colors::WHITE, ETextAlignment::TOPCENTER, TextOperations::formatMetric(stack->getCount(), 4));
 }
 
 void BattleStacksController::showStack(Canvas & canvas, const CStack * stack)
@@ -534,7 +537,7 @@ void BattleStacksController::stackMoved(const CStack *stack, std::vector<BattleH
 		addNewAnim(new MovementStartAnimation(owner, stack));
 	});
 
-	if (!stack->hasBonus(Selector::typeSubtype(BonusType::FLYING, 1)))
+	if (!stack->hasBonus(Selector::typeSubtype(BonusType::FLYING, BonusCustomSubtype::movementTeleporting)))
 	{
 		owner.addToAnimationStage(EAnimationEvents::MOVEMENT, [&]()
 		{
@@ -691,6 +694,8 @@ void BattleStacksController::endAction(const BattleAction & action)
 
 void BattleStacksController::startAction(const BattleAction & action)
 {
+	// if timer run out and we did not act in time - deactivate current stack
+	setActiveStack(nullptr);
 	removeExpiredColorFilters();
 }
 
@@ -797,7 +802,7 @@ void BattleStacksController::removeExpiredColorFilters()
 	{
 		if (!filter.persistent)
 		{
-			if (filter.source && !filter.target->hasBonus(Selector::source(BonusSource::SPELL_EFFECT, filter.source->id), Selector::all))
+			if (filter.source && !filter.target->hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(filter.source->id)), Selector::all))
 				return true;
 			if (filter.effect == ColorFilter::genEmptyShifter())
 				return true;
@@ -809,6 +814,9 @@ void BattleStacksController::removeExpiredColorFilters()
 void BattleStacksController::updateHoveredStacks()
 {
 	auto newStacks = selectHoveredStacks();
+
+	if(newStacks.size() == 0)
+		owner.windowObject->updateStackInfoWindow(nullptr);
 
 	for(const auto * stack : mouseHoveredStacks)
 	{
@@ -826,10 +834,14 @@ void BattleStacksController::updateHoveredStacks()
 		if (vstd::contains(mouseHoveredStacks, stack))
 			continue;
 
+		owner.windowObject->updateStackInfoWindow(newStacks.size() == 1 && vstd::find_pos(newStacks, stack) == 0 ? stack : nullptr);
 		stackAnimation[stack->unitId()]->setBorderColor(AnimationControls::getBlueBorder());
 		if (stackAnimation[stack->unitId()]->framesInGroup(ECreatureAnimType::MOUSEON) > 0 && stack->alive() && !stack->isFrozen())
 			stackAnimation[stack->unitId()]->playOnce(ECreatureAnimType::MOUSEON);
 	}
+
+	if(mouseHoveredStacks != newStacks)
+		GH.windows().totalRedraw(); //fix for frozen stack info window and blue border in action bar
 
 	mouseHoveredStacks = newStacks;
 }

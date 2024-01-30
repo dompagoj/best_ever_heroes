@@ -76,8 +76,12 @@ bool ObjectBrowserProxyModel::filterAcceptsRowText(int source_row, const QModelI
 	auto item = dynamic_cast<QStandardItemModel*>(sourceModel())->itemFromIndex(index);
 	if(!item)
 		return false;
+	
+	auto data = item->data().toJsonObject();
 
-	return (filter.isNull() || filter.isEmpty() || item->text().contains(filter, Qt::CaseInsensitive));
+	return (filter.isNull() || filter.isEmpty()
+			|| item->text().contains(filter, Qt::CaseInsensitive)
+			|| data["typeName"].toString().contains(filter, Qt::CaseInsensitive));
 }
 
 Qt::ItemFlags ObjectBrowserProxyModel::flags(const QModelIndex & index) const
@@ -124,7 +128,7 @@ void ObjectBrowser::startDrag(Qt::DropActions supportedActions)
 	if(!mimeData)
 		return;
 		
-	QDrag *drag = new QDrag(this);
+	auto *drag = new QDrag(this);
 	drag->setMimeData(mimeData);
 	drag->exec(supportedActions);
 }

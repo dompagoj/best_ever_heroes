@@ -41,7 +41,6 @@
 #include "../render/IFont.h"
 #include "../render/IRenderHandler.h"
 
-#include "../../lib/NetPacksLobby.h"
 #include "../../lib/CGeneralTextHandler.h"
 #include "../../lib/CHeroHandler.h"
 #include "../../lib/CThreadHelper.h"
@@ -68,9 +67,9 @@ int ISelectionScreenInfo::getCurrentDifficulty()
 	return getStartInfo()->difficulty;
 }
 
-PlayerInfo ISelectionScreenInfo::getPlayerInfo(int color)
+PlayerInfo ISelectionScreenInfo::getPlayerInfo(PlayerColor color)
 {
-	return getMapInfo()->mapHeader->players[color];
+	return getMapInfo()->mapHeader->players.at(color.getNum());
 }
 
 CSelectionBase::CSelectionBase(ESelectionScreen type)
@@ -111,6 +110,14 @@ void CSelectionBase::toggleTab(std::shared_ptr<CIntObject> tab)
 	{
 		curTab.reset();
 	}
+
+	if(tabSel->showRandom && tab != tabOpt)
+	{
+		tabSel->curFolder = "";
+		tabSel->showRandom = false;
+		tabSel->filter(0, true);
+	}
+
 	GH.windows().totalRedraw();
 }
 
@@ -123,11 +130,12 @@ InfoCard::InfoCard()
 	pos.y += 6;
 
 	labelSaveDate = std::make_shared<CLabel>(310, 38, FONT_SMALL, ETextAlignment::BOTTOMRIGHT, Colors::WHITE);
+	labelMapSize = std::make_shared<CLabel>(333, 56, FONT_TINY, ETextAlignment::CENTER, Colors::WHITE);
 	mapName = std::make_shared<CLabel>(26, 39, FONT_BIG, ETextAlignment::TOPLEFT, Colors::YELLOW);
 	Rect descriptionRect(26, 149, 320, 115);
 	mapDescription = std::make_shared<CTextBox>("", descriptionRect, 1);
 	playerListBg = std::make_shared<CPicture>(ImagePath::builtin("CHATPLUG.bmp"), 16, 276);
-	chat = std::make_shared<CChatBox>(Rect(26, 132, 340, 132));
+	chat = std::make_shared<CChatBox>(Rect(18, 126, 335, 143));
 
 	if(SEL->screenType == ESelectionScreen::campaignList)
 	{
@@ -185,6 +193,7 @@ InfoCard::InfoCard()
 void InfoCard::disableLabelRedraws()
 {
 	labelSaveDate->setAutoRedraw(false);
+	labelMapSize->setAutoRedraw(false);
 	mapName->setAutoRedraw(false);
 	mapDescription->label->setAutoRedraw(false);
 	labelVictoryConditionText->setAutoRedraw(false);
@@ -200,8 +209,8 @@ void InfoCard::changeSelection()
 		return;
 
 	labelSaveDate->setText(mapInfo->date);
-	mapName->setText(mapInfo->getName());
-	mapDescription->setText(mapInfo->getDescription());
+	mapName->setText(mapInfo->getNameTranslated());
+	mapDescription->setText(mapInfo->getDescriptionTranslated());
 
 	mapDescription->label->scrollTextTo(0, false);
 	if(mapDescription->slider)
@@ -210,8 +219,11 @@ void InfoCard::changeSelection()
 	if(SEL->screenType == ESelectionScreen::campaignList)
 		return;
 
-	iconsMapSizes->setFrame(mapInfo->getMapSizeIconId());
 	const CMapHeader * header = mapInfo->mapHeader.get();
+
+	labelMapSize->setText(std::to_string(header->width) + "x" + std::to_string(header->height));
+	iconsMapSizes->setFrame(mapInfo->getMapSizeIconId());
+
 	iconsVictoryCondition->setFrame(header->victoryIconIndex);
 	labelVictoryConditionText->setText(header->victoryMessage.toString());
 	iconsLossCondition->setFrame(header->defeatIconIndex);
@@ -320,11 +332,19 @@ CChatBox::CChatBox(const Rect & rect)
 	setRedrawParent(true);
 
 	const int height = static_cast<int>(graphics->fonts[FONT_SMALL]->getLineHeight());
-	inputBox = std::make_shared<CTextInput>(Rect(0, rect.h - height, rect.w, height), EFonts::FONT_SMALL, 0);
+	Rect textInputArea(1, rect.h - height, rect.w - 1, height);
+	Rect chatHistoryArea(3, 1, rect.w - 3, rect.h - height - 1);
+	inputBackground = std::make_shared<TransparentFilledRectangle>(textInputArea, ColorRGBA(0,0,0,192));
+	inputBox = std::make_shared<CTextInput>(textInputArea, EFonts::FONT_SMALL, 0);
 	inputBox->removeUsedEvents(KEYBOARD);
-	chatHistory = std::make_shared<CTextBox>("", Rect(0, 0, rect.w, rect.h - height), 1);
+	chatHistory = std::make_shared<CTextBox>("", chatHistoryArea, 1);
 
 	chatHistory->label->color = Colors::GREEN;
+}
+
+bool CChatBox::captureThisKey(EShortcut key)
+{
+	return !inputBox->getText().empty() && key == EShortcut::GLOBAL_ACCEPT;
 }
 
 void CChatBox::keyPressed(EShortcut key)
@@ -398,8 +418,9 @@ CFlagBox::CFlagBoxTooltipBox::CFlagBoxTooltipBox(std::shared_ptr<CAnimation> ico
 	labelTeamAlignment = std::make_shared<CLabel>(128, 30, FONT_MEDIUM, ETextAlignment::CENTER, Colors::YELLOW, CGI->generaltexth->allTexts[657]);
 	labelGroupTeams = std::make_shared<CLabelGroup>(FONT_SMALL, ETextAlignment::CENTER, Colors::WHITE);
 
-	std::vector<std::set<ui8>> teams(PlayerColor::PLAYER_LIMIT_I);
-	for(ui8 j = 0; j < PlayerColor::PLAYER_LIMIT_I; j++)
+	std::vector<std::set<PlayerColor>> teams(PlayerColor::PLAYER_LIMIT_I);
+
+	for(PlayerColor j(0); j < PlayerColor::PLAYER_LIMIT; j++)
 	{
 		if(SEL->getPlayerInfo(j).canHumanPlay || SEL->getPlayerInfo(j).canComputerPlay)
 		{

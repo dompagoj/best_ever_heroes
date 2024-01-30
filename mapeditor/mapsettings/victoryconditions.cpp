@@ -179,7 +179,7 @@ void VictoryConditions::initialize(MapController & c)
 void VictoryConditions::update()
 {
 	//victory messages
-	controller->map()->victoryMessage = MetaString::createFromRawString(ui->victoryMessageEdit->text().toStdString());
+	bool customMessage = true;
 
 	//victory conditions
 	EventCondition victoryCondition(EventCondition::STANDARD_WIN);
@@ -199,6 +199,7 @@ void VictoryConditions::update()
 		controller->map()->triggeredEvents.push_back(standardVictory);
 		controller->map()->victoryIconIndex = 11;
 		controller->map()->victoryMessage = MetaString::createFromTextID("core.vcdesc.0");
+		customMessage = false;
 	}
 	else
 	{
@@ -211,13 +212,14 @@ void VictoryConditions::update()
 
 		controller->map()->victoryIconIndex = vicCondition;
 		controller->map()->victoryMessage = MetaString::createFromTextID("core.vcdesc." + std::to_string(vicCondition + 1));
+		customMessage = false;
 
 		switch(vicCondition)
 		{
 			case 0: {
 				EventCondition cond(EventCondition::HAVE_ARTIFACT);
 				assert(victoryTypeWidget);
-				cond.objectType = victoryTypeWidget->currentData().toInt();
+				cond.objectType = ArtifactID(victoryTypeWidget->currentData().toInt());
 				specialVictory.effect.toOtherMessage.appendTextID("core.genrltxt.281");
 				specialVictory.onFulfill.appendTextID("core.genrltxt.280");
 				specialVictory.trigger = EventExpression(cond);
@@ -227,7 +229,7 @@ void VictoryConditions::update()
 			case 1: {
 				EventCondition cond(EventCondition::HAVE_CREATURES);
 				assert(victoryTypeWidget);
-				cond.objectType = victoryTypeWidget->currentData().toInt();
+				cond.objectType = CreatureID(victoryTypeWidget->currentData().toInt());
 				cond.value = victoryValueWidget->text().toInt();
 				specialVictory.effect.toOtherMessage.appendTextID("core.genrltxt.277");
 				specialVictory.onFulfill.appendTextID("core.genrltxt.276");
@@ -238,7 +240,7 @@ void VictoryConditions::update()
 			case 2: {
 				EventCondition cond(EventCondition::HAVE_RESOURCES);
 				assert(victoryTypeWidget);
-				cond.objectType = victoryTypeWidget->currentData().toInt();
+				cond.objectType = GameResID(victoryTypeWidget->currentData().toInt());
 				cond.value = victoryValueWidget->text().toInt();
 				specialVictory.effect.toOtherMessage.appendTextID("core.genrltxt.279");
 				specialVictory.onFulfill.appendTextID("core.genrltxt.278");
@@ -249,7 +251,7 @@ void VictoryConditions::update()
 			case 3: {
 				EventCondition cond(EventCondition::HAVE_BUILDING);
 				assert(victoryTypeWidget);
-				cond.objectType = victoryTypeWidget->currentData().toInt();
+				cond.objectType = BuildingID(victoryTypeWidget->currentData().toInt());
 				int townIdx = victorySelectWidget->currentData().toInt();
 				if(townIdx > -1)
 					cond.position = controller->map()->objects[townIdx]->pos;
@@ -262,7 +264,7 @@ void VictoryConditions::update()
 			case 4: {
 				EventCondition cond(EventCondition::CONTROL);
 				assert(victoryTypeWidget);
-				cond.objectType = Obj::TOWN;
+				cond.objectType = Obj(Obj::TOWN);
 				int townIdx = victoryTypeWidget->currentData().toInt();
 				cond.position = controller->map()->objects[townIdx]->pos;
 				specialVictory.effect.toOtherMessage.appendTextID("core.genrltxt.250");
@@ -274,7 +276,7 @@ void VictoryConditions::update()
 			case 5: {
 				EventCondition cond(EventCondition::DESTROY);
 				assert(victoryTypeWidget);
-				cond.objectType = Obj::HERO;
+				cond.objectType = Obj(Obj::HERO);
 				int heroIdx = victoryTypeWidget->currentData().toInt();
 				cond.position = controller->map()->objects[heroIdx]->pos;
 				specialVictory.effect.toOtherMessage.appendTextID("core.genrltxt.253");
@@ -286,7 +288,7 @@ void VictoryConditions::update()
 			case 6: {
 				EventCondition cond(EventCondition::TRANSPORT);
 				assert(victoryTypeWidget);
-				cond.objectType = victoryTypeWidget->currentData().toInt();
+				cond.objectType = ArtifactID(victoryTypeWidget->currentData().toInt());
 				int townIdx = victorySelectWidget->currentData().toInt();
 				if(townIdx > -1)
 					cond.position = controller->map()->objects[townIdx]->pos;
@@ -299,7 +301,7 @@ void VictoryConditions::update()
 			case 7: {
 				EventCondition cond(EventCondition::DESTROY);
 				assert(victoryTypeWidget);
-				cond.objectType = Obj::MONSTER;
+				cond.objectType = Obj(Obj::MONSTER);
 				int monsterIdx = victoryTypeWidget->currentData().toInt();
 				cond.position = controller->map()->objects[monsterIdx]->pos;
 				specialVictory.effect.toOtherMessage.appendTextID("core.genrltxt.287");
@@ -327,8 +329,14 @@ void VictoryConditions::update()
 			controller->map()->victoryMessage.appendRawString(" / ");
 			controller->map()->victoryMessage.appendTextID("core.vcdesc.0");
 			controller->map()->triggeredEvents.push_back(standardVictory);
+			customMessage = false;
 		}
 		controller->map()->triggeredEvents.push_back(specialVictory);
+	}
+	
+	if(customMessage)
+	{
+		controller->map()->victoryMessage = MetaString::createFromTextID(mapRegisterLocalizedString("map", *controller->map(), TextIdentifier("header", "victoryMessage"), ui->victoryMessageEdit->text().toStdString()));
 	}
 }
 

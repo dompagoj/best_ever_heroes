@@ -41,6 +41,10 @@ static_assert(sizeof(bool) == 1, "Bool needs to be 1 byte in size.");
 #  define VCMI_UNIX
 #  define VCMI_XDG
 #  define VCMI_FREEBSD
+#elif defined(__OpenBSD__)
+#  define VCMI_UNIX
+#  define VCMI_XDG
+#  define VCMI_OPENBSD
 #elif defined(__HAIKU__)
 #  define VCMI_UNIX
 #  define VCMI_XDG
@@ -99,6 +103,12 @@ static_assert(sizeof(bool) == 1, "Bool needs to be 1 byte in size.");
 #endif
 
 #define _USE_MATH_DEFINES
+
+#ifndef NDEBUG
+// Enable additional debug checks from glibc / libstdc++ when building with enabled assertions
+// Since these defines must be declared BEFORE including glibc header we can not check for __GLIBCXX__ macro to detect that glibc is in use
+#  define _GLIBCXX_ASSERTIONS
+#endif
 
 #include <algorithm>
 #include <any>
@@ -464,6 +474,19 @@ namespace vstd
 
 	template<typename Elem, typename Predicate>
 	void erase_if(std::set<Elem> &setContainer, Predicate pred)
+	{
+		auto itr = setContainer.begin();
+		auto endItr = setContainer.end();
+		while(itr != endItr)
+		{
+			auto tmpItr = itr++;
+			if(pred(*tmpItr))
+				setContainer.erase(tmpItr);
+		}
+	}
+
+	template<typename Elem, typename Predicate>
+	void erase_if(std::unordered_set<Elem> &setContainer, Predicate pred)
 	{
 		auto itr = setContainer.begin();
 		auto endItr = setContainer.end();

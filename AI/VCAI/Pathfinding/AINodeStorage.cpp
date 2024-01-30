@@ -250,7 +250,7 @@ void AINodeStorage::calculateTownPortalTeleportations(
 			return;
 		}
 
-		if(skillLevel < SecSkillLevel::ADVANCED)
+		if(skillLevel < MasteryLevel::ADVANCED)
 		{
 			const CGTownInstance * nearestTown = *vstd::minElementByFun(towns, [&](const CGTownInstance * t) -> int
 			{
@@ -321,9 +321,7 @@ bool AINodeStorage::hasBetterChain(const PathNodeInfo & source, CDestinationNode
 
 bool AINodeStorage::isTileAccessible(const int3 & pos, const EPathfindingLayer layer) const
 {
-	const AIPathNode & node = nodes[layer][pos.z][pos.x][pos.y][0];
-
-	return node.action != EPathNodeAction::UNKNOWN;
+	return nodes[layer][pos.z][pos.x][pos.y][0].action != EPathNodeAction::UNKNOWN;
 }
 
 std::vector<AIPath> AINodeStorage::getChainInfo(const int3 & pos, bool isOnLand) const

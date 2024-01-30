@@ -188,13 +188,7 @@ std::set<TerrainId> ZoneOptions::getDefaultTerrainTypes() const
 
 std::set<FactionID> ZoneOptions::getDefaultTownTypes() const
 {
-	std::set<FactionID> defaultTowns;
-	auto towns = VLC->townh->getDefaultAllowed();
-	for(int i = 0; i < towns.size(); ++i)
-	{
-		if(towns[i]) defaultTowns.insert(FactionID(i));
-	}
-	return defaultTowns;
+	return VLC->townh->getDefaultAllowed();
 }
 
 const std::set<FactionID> ZoneOptions::getTownTypes() const
@@ -557,9 +551,9 @@ const CRmgTemplate::CPlayerCountRange & CRmgTemplate::getPlayers() const
 	return players;
 }
 
-const CRmgTemplate::CPlayerCountRange & CRmgTemplate::getCpuPlayers() const
+const CRmgTemplate::CPlayerCountRange & CRmgTemplate::getHumanPlayers() const
 {
-	return cpuPlayers;
+	return humanPlayers;
 }
 
 const CRmgTemplate::Zones & CRmgTemplate::getZones() const
@@ -675,13 +669,23 @@ void CRmgTemplate::CPlayerCountRange::fromString(const std::string & value)
 	}
 }
 
+int CRmgTemplate::CPlayerCountRange::maxValue() const
+{
+	return *boost::max_element(getNumbers());
+}
+
+int CRmgTemplate::CPlayerCountRange::minValue() const
+{
+	return *boost::min_element(getNumbers());
+}
+
 void CRmgTemplate::serializeJson(JsonSerializeFormat & handler)
 {
 	handler.serializeString("name", name);
 	serializeSize(handler, minSize, "minSize");
 	serializeSize(handler, maxSize, "maxSize");
 	serializePlayers(handler, players, "players");
-	serializePlayers(handler, cpuPlayers, "cpu");
+	serializePlayers(handler, humanPlayers, "humans"); // TODO: Rename this parameter
 
 	{
 		auto connectionsData = handler.enterArray("connections");

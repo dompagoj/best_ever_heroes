@@ -14,13 +14,15 @@
 #include <vcmi/spells/Spell.h>
 #include <vcmi/spells/Service.h>
 
-#include "../NetPacks.h"
 #include "../CSoundBase.h"
 
 #include "../CSkillHandler.h"
 #include "../StartInfo.h"
 #include "../IGameCallback.h"
 #include "../constants/StringConstants.h"
+#include "../networkPacks/PacksForClient.h"
+#include "../networkPacks/PacksForClientBattle.h"
+#include "../mapObjects/CGHeroInstance.h"
 #include "../serializer/JsonSerializeFormat.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
@@ -35,7 +37,7 @@ void CGPandoraBox::init()
 	{
 		i.reward.removeObject = true;
 		if(!message.empty() && i.message.empty())
-			i.message = MetaString::createFromRawString(message);
+			i.message = message;
 	}
 }
 
@@ -64,7 +66,7 @@ void CGPandoraBox::grantRewardWithMessage(const CGHeroInstance * h, int index, b
 		return text;
 	};
 	
-	auto sendInfoWindow = [h](const MetaString & text, const Rewardable::Reward & reward)
+	auto sendInfoWindow = [&](const MetaString & text, const Rewardable::Reward & reward)
 	{
 		InfoWindow iw;
 		iw.player = h->tempOwner;
@@ -133,7 +135,7 @@ void CGPandoraBox::grantRewardWithMessage(const CGHeroInstance * h, int index, b
 		for(auto c : vi.reward.creatures)
 		{
 			loot.appendRawString("%s");
-			loot.replaceCreatureName(c);
+			loot.replaceName(c);
 		}
 		
 		if(vi.reward.creatures.size() == 1 && vi.reward.creatures[0].count == 1)
@@ -209,7 +211,7 @@ void CGPandoraBox::serializeJsonOptions(JsonSerializeFormat & handler)
 {
 	CRewardableObject::serializeJsonOptions(handler);
 	
-	handler.serializeString("guardMessage", message);
+	handler.serializeStruct("guardMessage", message);
 	
 	if(!handler.saving)
 	{
@@ -224,14 +226,14 @@ void CGPandoraBox::serializeJsonOptions(JsonSerializeFormat & handler)
 		handler.serializeInt("experience", vinfo.reward.heroExperience, 0);
 		handler.serializeInt("mana", vinfo.reward.manaDiff, 0);
 		
-		int val;
+		int val = 0;
 		handler.serializeInt("morale", val, 0);
 		if(val)
-			vinfo.reward.bonuses.emplace_back(BonusDuration::ONE_BATTLE, BonusType::MORALE, BonusSource::OBJECT, val, id);
+			vinfo.reward.bonuses.emplace_back(BonusDuration::ONE_BATTLE, BonusType::MORALE, BonusSource::OBJECT_INSTANCE, val, BonusSourceID(id));
 		
 		handler.serializeInt("luck", val, 0);
 		if(val)
-			vinfo.reward.bonuses.emplace_back(BonusDuration::ONE_BATTLE, BonusType::LUCK, BonusSource::OBJECT, val, id);
+			vinfo.reward.bonuses.emplace_back(BonusDuration::ONE_BATTLE, BonusType::LUCK, BonusSource::OBJECT_INSTANCE, val, BonusSourceID(id));
 		
 		vinfo.reward.resources.serializeJson(handler, "resources");
 		{
@@ -255,7 +257,7 @@ void CGPandoraBox::serializeJsonOptions(JsonSerializeFormat & handler)
 				const std::string skillName = p.first;
 				const std::string levelId = p.second.String();
 				
-				const int rawId = CSkillHandler::decodeSkill(skillName);
+				const int rawId = SecondarySkill::decode(skillName);
 				if(rawId < 0)
 				{
 					logGlobal->error("Invalid secondary skill %s", skillName);
@@ -277,11 +279,10 @@ void CGPandoraBox::serializeJsonOptions(JsonSerializeFormat & handler)
 		|| vinfo.reward.heroExperience
 		|| vinfo.reward.manaDiff
 		|| vinfo.reward.resources.nonZero()
+		|| !vinfo.reward.artifacts.empty()
 		|| !vinfo.reward.bonuses.empty()
-		|| !vinfo.reward.artifacts.empty()
-		|| !vinfo.reward.secondary.empty()
-		|| !vinfo.reward.artifacts.empty()
-		|| !vinfo.reward.creatures.empty();
+		|| !vinfo.reward.creatures.empty()
+		|| !vinfo.reward.secondary.empty();
 		
 		if(hasSomething)
 			configuration.info.push_back(vinfo);
@@ -297,7 +298,7 @@ void CGEvent::init()
 	{
 		i.reward.removeObject = removeAfterVisit;
 		if(!message.empty() && i.message.empty())
-			i.message = MetaString::createFromRawString(message);
+			i.message = message;
 	}
 }
 
@@ -327,7 +328,7 @@ void CGEvent::activated( const CGHeroInstance * h ) const
 		InfoWindow iw;
 		iw.player = h->tempOwner;
 		if(!message.empty())
-			iw.text.appendRawString(message);
+			iw.text = message;
 		else
 			iw.text.appendLocalString(EMetaText::ADVOB_TXT, 16);
 		cb->showInfoDialog(&iw);

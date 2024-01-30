@@ -9,7 +9,7 @@
  */
 #pragma once
 
-#include "../lib/NetPackVisitor.h"
+#include "../lib/networkPacks/NetPackVisitor.h"
 
 class ApplyGhNetPackVisitor : public VCMI_LIB_WRAP_NAMESPACE(ICPackVisitor)
 {
@@ -29,6 +29,7 @@ public:
 	}
 
 	virtual void visitSaveGame(SaveGame & pack) override;
+	virtual void visitGamePause(GamePause & pack) override;
 	virtual void visitEndTurn(EndTurn & pack) override;
 	virtual void visitDismissHero(DismissHero & pack) override;
 	virtual void visitMoveHero(MoveHero & pack) override;

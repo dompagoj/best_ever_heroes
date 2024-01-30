@@ -40,6 +40,8 @@ class CGameState;
 class PathfinderConfig;
 struct TurnTimerInfo;
 
+struct ArtifactLocation;
+class CArtifactSet;
 class CArmedInstance;
 class CGObjectInstance;
 class CGHeroInstance;
@@ -55,7 +57,9 @@ public:
 //	//various
 	virtual int getDate(Date mode=Date::DAY) const = 0; //mode=0 - total days in game, mode=1 - day of week, mode=2 - current week, mode=3 - current month
 //	const StartInfo * getStartInfo(bool beforeRandomization = false)const;
-	virtual bool isAllowed(int32_t type, int32_t id) const = 0; //type: 0 - spell; 1- artifact; 2 - secondary skill
+	virtual bool isAllowed(SpellID id) const = 0;
+	virtual bool isAllowed(ArtifactID id) const = 0;
+	virtual bool isAllowed(SecondarySkill id) const = 0;
 
 	//player
 	virtual std::optional<PlayerColor> getPlayerID() const = 0;
@@ -89,7 +93,7 @@ public:
 //	std::vector <const CGObjectInstance * > getFlaggableObjects(int3 pos) const;
 //	const CGObjectInstance * getTopObj (int3 pos) const;
 //	PlayerColor getOwner(ObjectInstanceID heroID) const;
-//	const CGObjectInstance *getObjByQuestIdentifier(int identifier) const; //nullptr if object has been removed (eg. killed)
+//	const CGObjectInstance *getObjByQuestIdentifier(ObjectInstanceID identifier) const; //nullptr if object has been removed (eg. killed)
 
 	//map
 //	int3 guardingCreaturePosition (int3 pos) const;
@@ -130,7 +134,7 @@ class DLL_LINKAGE CGameInfoCallback : public IGameInfoCallback
 protected:
 	CGameState * gs;//todo: replace with protected const getter, only actual Server and Client objects should hold game state
 
-	CGameInfoCallback() = default;
+	CGameInfoCallback();
 	CGameInfoCallback(CGameState * GS);
 	bool hasAccess(std::optional<PlayerColor> playerId) const;
 
@@ -141,7 +145,9 @@ public:
 	//various
 	int getDate(Date mode=Date::DAY)const override; //mode=0 - total days in game, mode=1 - day of week, mode=2 - current week, mode=3 - current month
 	virtual const StartInfo * getStartInfo(bool beforeRandomization = false)const;
-	bool isAllowed(int32_t type, int32_t id) const override; //type: 0 - spell; 1- artifact; 2 - secondary skill
+	bool isAllowed(SpellID id) const override;
+	bool isAllowed(ArtifactID id) const override;
+	bool isAllowed(SecondarySkill id) const override;
 
 	//player
 	std::optional<PlayerColor> getPlayerID() const override;
@@ -174,6 +180,7 @@ public:
 	virtual int64_t estimateSpellDamage(const CSpell * sp, const CGHeroInstance * hero) const; //estimates damage of given spell; returns 0 if spell causes no dmg
 	virtual const CArtifactInstance * getArtInstance(ArtifactInstanceID aid) const;
 	virtual const CGObjectInstance * getObjInstance(ObjectInstanceID oid) const;
+	virtual CArtifactSet * getArtSet(const ArtifactLocation & loc) const;
 	//virtual const CGObjectInstance * getArmyInstance(ObjectInstanceID oid) const;
 
 	//objects
@@ -183,7 +190,7 @@ public:
 	virtual std::vector <const CGObjectInstance * > getFlaggableObjects(int3 pos) const;
 	virtual const CGObjectInstance * getTopObj (int3 pos) const;
 	virtual PlayerColor getOwner(ObjectInstanceID heroID) const;
-	virtual const CGObjectInstance *getObjByQuestIdentifier(int identifier) const; //nullptr if object has been removed (eg. killed)
+	virtual const CGObjectInstance *getObjByQuestIdentifier(ObjectInstanceID identifier) const; //nullptr if object has been removed (eg. killed)
 
 	//map
 	virtual int3 guardingCreaturePosition (int3 pos) const;
@@ -244,8 +251,6 @@ public:
 
 	virtual int getResourceAmount(GameResID type) const;
 	virtual TResources getResourceAmount() const;
-	virtual std::shared_ptr<const boost::multi_array<ui8, 3>> getVisibilityMap() const; //returns visibility map
-	//virtual const PlayerSettings * getPlayerSettings(PlayerColor color) const;
 };
 
 VCMI_LIB_NAMESPACE_END

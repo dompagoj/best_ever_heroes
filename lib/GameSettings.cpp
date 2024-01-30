@@ -74,6 +74,7 @@ void GameSettings::load(const JsonNode & input)
 		{EGameSettings::HEROES_RETREAT_ON_WIN_WITHOUT_TROOPS,   "heroes",    "retreatOnWinWithoutTroops"  },
 		{EGameSettings::HEROES_STARTING_STACKS_CHANCES,         "heroes",    "startingStackChances"       },
 		{EGameSettings::HEROES_BACKPACK_CAP,                    "heroes",    "backpackSize"               },
+		{EGameSettings::HEROES_TAVERN_INVITE,                   "heroes",    "tavernInvite"               },
 		{EGameSettings::MAP_FORMAT_RESTORATION_OF_ERATHIA,      "mapFormat", "restorationOfErathia"       },
 		{EGameSettings::MAP_FORMAT_ARMAGEDDONS_BLADE,           "mapFormat", "armageddonsBlade"           },
 		{EGameSettings::MAP_FORMAT_SHADOW_OF_DEATH,             "mapFormat", "shadowOfDeath"              },
@@ -95,6 +96,7 @@ void GameSettings::load(const JsonNode & input)
 		{EGameSettings::TEXTS_ROAD,                             "textData",  "road"                       },
 		{EGameSettings::TEXTS_SPELL,                            "textData",  "spell"                      },
 		{EGameSettings::TEXTS_TERRAIN,                          "textData",  "terrain"                    },
+		{EGameSettings::PATHFINDER_IGNORE_GUARDS,               "pathfinder", "ignoreGuards"              },
 		{EGameSettings::PATHFINDER_USE_BOAT,                    "pathfinder", "useBoat"                   },
 		{EGameSettings::PATHFINDER_USE_MONOLITH_TWO_WAY,        "pathfinder", "useMonolithTwoWay"         },
 		{EGameSettings::PATHFINDER_USE_MONOLITH_ONE_WAY_UNIQUE, "pathfinder", "useMonolithOneWayUnique"   },
@@ -118,11 +120,10 @@ void GameSettings::load(const JsonNode & input)
 
 const JsonNode & GameSettings::getValue(EGameSettings option) const
 {
-	assert(option < EGameSettings::OPTIONS_COUNT);
 	auto index = static_cast<size_t>(option);
 
-	assert(!gameSettings[index].isNull());
-	return gameSettings[index];
+	assert(!gameSettings.at(index).isNull());
+	return gameSettings.at(index);
 }
 
 VCMI_LIB_NAMESPACE_END

@@ -80,7 +80,7 @@ MapFormatFeaturesH3M MapFormatFeaturesH3M::getFeaturesAB()
 	result.creaturesCount = 145; // + Conflux and new neutrals
 
 	result.heroesCount = 156; // + Conflux and campaign heroes
-	result.heroesPortraitsCount = 163;
+	result.heroesPortraitsCount = 159; // +Kendal, +young Cristian, +Ordwald
 	result.heroesBytes = 20;
 
 	result.artifactsCount = 129; // + Armaggedon Blade and Vial of Dragon Blood
@@ -97,8 +97,10 @@ MapFormatFeaturesH3M MapFormatFeaturesH3M::getFeaturesSOD()
 	MapFormatFeaturesH3M result = getFeaturesAB();
 	result.levelSOD = true;
 
-	result.artifactsCount = 141; // + Combined artifacts
+	result.artifactsCount = 144; // + Combined artifacts + 3 unfinished artifacts (required for some maps)
 	result.artifactsBytes = 18;
+
+	result.heroesPortraitsCount = 163; // +Finneas +young Gem +young Sandro +young Yog
 
 	result.artifactSlotsCount = 19; // + MISC_5 slot
 

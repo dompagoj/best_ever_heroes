@@ -38,6 +38,7 @@ enum class EGameSettings
 	HEROES_RETREAT_ON_WIN_WITHOUT_TROOPS,
 	HEROES_STARTING_STACKS_CHANCES,
 	HEROES_BACKPACK_CAP,
+	HEROES_TAVERN_INVITE,
 	MARKETS_BLACK_MARKET_RESTOCK_PERIOD,
 	BANKS_SHOW_GUARDS_COMPOSITION,
 	MODULE_COMMANDERS,
@@ -60,6 +61,7 @@ enum class EGameSettings
 	MAP_FORMAT_JSON_VCMI,
 	MAP_FORMAT_IN_THE_WAKE_OF_GODS,
 	PATHFINDER_USE_BOAT,
+	PATHFINDER_IGNORE_GUARDS,
 	PATHFINDER_USE_MONOLITH_TWO_WAY,
 	PATHFINDER_USE_MONOLITH_ONE_WAY_UNIQUE,
 	PATHFINDER_USE_MONOLITH_ONE_WAY_RANDOM,
@@ -95,7 +97,7 @@ public:
 	const JsonNode & getValue(EGameSettings option) const override;
 
 	template<typename Handler>
-	void serialize(Handler & h, const int version)
+	void serialize(Handler & h)
 	{
 		h & gameSettings;
 	}

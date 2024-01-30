@@ -38,7 +38,6 @@
 #include "../lib/CConfigHandler.h"
 #include "../lib/CGeneralTextHandler.h"
 #include "../lib/CThreadHelper.h"
-#include "../lib/NetPackVisitor.h"
 #include "../lib/StartInfo.h"
 #include "../lib/TurnTimerInfo.h"
 #include "../lib/VCMIDirs.h"
@@ -48,9 +47,10 @@
 #include "../lib/modding/ModIncompatibility.h"
 #include "../lib/rmg/CMapGenOptions.h"
 #include "../lib/filesystem/Filesystem.h"
-#include "../lib/registerTypes/RegisterTypes.h"
+#include "../lib/registerTypes/RegisterTypesLobbyPacks.h"
 #include "../lib/serializer/Connection.h"
 #include "../lib/serializer/CMemorySerializer.h"
+#include "../lib/UnlockGuard.h"
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -90,12 +90,12 @@ template<typename T> class CApplyOnLobby : public CBaseForLobbyApply
 public:
 	bool applyOnLobbyHandler(CServerHandler * handler, void * pack) const override
 	{
-		boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
+		boost::mutex::scoped_lock interfaceLock(GH.interfaceMutex);
 
 		T * ptr = static_cast<T *>(pack);
 		ApplyOnLobbyHandlerNetPackVisitor visitor(*handler);
 
-		logNetwork->trace("\tImmediately apply on lobby: %s", typeList.getTypeInfo(ptr)->name());
+		logNetwork->trace("\tImmediately apply on lobby: %s", typeid(ptr).name());
 		ptr->visit(visitor);
 
 		return visitor.getResult();
@@ -106,7 +106,7 @@ public:
 		T * ptr = static_cast<T *>(pack);
 		ApplyOnLobbyScreenNetPackVisitor visitor(*handler, lobby);
 
-		logNetwork->trace("\tApply on lobby from queue: %s", typeList.getTypeInfo(ptr)->name());
+		logNetwork->trace("\tApply on lobby from queue: %s", typeid(ptr).name());
 		ptr->visit(visitor);
 	}
 };
@@ -141,6 +141,8 @@ CServerHandler::CServerHandler()
 	applier = std::make_shared<CApplier<CBaseForLobbyApply>>();
 	registerTypesLobbyPacks(*applier);
 }
+
+CServerHandler::~CServerHandler() = default;
 
 void CServerHandler::resetStateForLobby(const StartInfo::EMode mode, const std::vector<std::string> * names)
 {
@@ -260,6 +262,9 @@ void CServerHandler::justConnectToServer(const std::string & addr, const ui16 po
 					addr.size() ? addr : getHostAddress(),
 					port ? port : getHostPort(),
 					NAME, uuid);
+
+			nextClient = std::make_unique<CClient>();
+			c->iser.cb = nextClient.get();
 		}
 		catch(std::runtime_error & error)
 		{
@@ -296,11 +301,11 @@ void CServerHandler::applyPacksOnLobbyScreen()
 	boost::unique_lock<boost::recursive_mutex> lock(*mx);
 	while(!packsForLobbyScreen.empty())
 	{
-		boost::unique_lock<boost::recursive_mutex> guiLock(*CPlayerInterface::pim);
+		boost::mutex::scoped_lock interfaceLock(GH.interfaceMutex);
 		CPackForLobby * pack = packsForLobbyScreen.front();
 		packsForLobbyScreen.pop_front();
-		CBaseForLobbyApply * apply = applier->getApplier(typeList.getTypeID(pack)); //find the applier
-		apply->applyOnLobbyScreen(static_cast<CLobbyScreen *>(SEL), this, pack);
+		CBaseForLobbyApply * apply = applier->getApplier(CTypeList::getInstance().getTypeID(pack)); //find the applier
+		apply->applyOnLobbyScreen(dynamic_cast<CLobbyScreen *>(SEL), this, pack);
 		GH.windows().totalRedraw();
 		delete pack;
 	}
@@ -417,6 +422,13 @@ void CServerHandler::sendClientDisconnecting()
 		logNetwork->info("Sent leaving signal to the server");
 	}
 	sendLobbyPack(lcd);
+	
+	{
+		// Network thread might be applying network pack at this moment
+		auto unlockInterface = vstd::makeUnlockGuard(GH.interfaceMutex);
+		c->close();
+		c.reset();
+	}
 }
 
 void CServerHandler::setCampaignState(std::shared_ptr<CampaignState> newCampaign)
@@ -462,6 +474,14 @@ void CServerHandler::setPlayer(PlayerColor color) const
 	sendLobbyPack(lsp);
 }
 
+void CServerHandler::setPlayerName(PlayerColor color, const std::string & name) const
+{
+	LobbySetPlayerName lspn;
+	lspn.color = color;
+	lspn.name = name;
+	sendLobbyPack(lspn);
+}
+
 void CServerHandler::setPlayerOption(ui8 what, int32_t value, PlayerColor player) const
 {
 	LobbyChangePlayerOption lcpo;
@@ -492,6 +512,13 @@ void CServerHandler::setTurnTimerInfo(const TurnTimerInfo & info) const
 	sendLobbyPack(lstt);
 }
 
+void CServerHandler::setExtraOptionsInfo(const ExtraOptionsInfo & info) const
+{
+	LobbySetExtraOptions lseo;
+	lseo.extraOptionsInfo = info;
+	sendLobbyPack(lseo);
+}
+
 void CServerHandler::sendMessage(const std::string & txt) const
 {
 	std::istringstream readed;
@@ -511,7 +538,8 @@ void CServerHandler::sendMessage(const std::string & txt) const
 	}
 	else if(command == "!forcep")
 	{
-		std::string connectedId, playerColorId;
+		std::string connectedId;
+		std::string playerColorId;
 		readed >> connectedId;
 		readed >> playerColorId;
 		if(connectedId.length() && playerColorId.length())
@@ -589,7 +617,9 @@ bool CServerHandler::validateGameStart(bool allowOnlyAI) const
 void CServerHandler::sendStartGame(bool allowOnlyAI) const
 {
 	verifyStateBeforeStart(allowOnlyAI ? true : settings["session"]["onlyai"].Bool());
-	GH.windows().createAndPushWindow<CLoadingScreen>();
+
+	if(!settings["session"]["headless"].Bool())
+		GH.windows().createAndPushWindow<CLoadingScreen>();
 	
 	LobbyStartGame lsg;
 	if(client)
@@ -611,11 +641,10 @@ void CServerHandler::startMapAfterConnection(std::shared_ptr<CMapInfo> to)
 
 void CServerHandler::startGameplay(VCMI_LIB_WRAP_NAMESPACE(CGameState) * gameState)
 {
-	setThreadName("startGameplay");
-
 	if(CMM)
 		CMM->disable();
-	client = new CClient();
+
+	std::swap(client, nextClient);
 
 	highScoreCalc = nullptr;
 
@@ -657,9 +686,6 @@ void CServerHandler::startGameplay(VCMI_LIB_WRAP_NAMESPACE(CGameState) * gameSta
 
 void CServerHandler::endGameplay(bool closeConnection, bool restart)
 {
-	client->endGame();
-	vstd::clear_pointer(client);
-
 	if(closeConnection)
 	{
 		// Game is ending
@@ -667,6 +693,10 @@ void CServerHandler::endGameplay(bool closeConnection, bool restart)
 		CSH->sendClientDisconnecting();
 		logNetwork->info("Closed connection.");
 	}
+
+	client->endGame();
+	client.reset();
+
 	if(!restart)
 	{
 		if(CMM)
@@ -680,8 +710,13 @@ void CServerHandler::endGameplay(bool closeConnection, bool restart)
 		}
 	}
 	
-	c->enterLobbyConnectionMode();
-	c->disableStackSendingByID();
+	if(c)
+	{
+		nextClient = std::make_unique<CClient>();
+		c->iser.cb = nextClient.get();
+		c->enterLobbyConnectionMode();
+		c->disableStackSendingByID();
+	}
 	
 	//reset settings
 	Settings saveSession = settings.write["server"]["reconnect"];
@@ -701,7 +736,7 @@ void CServerHandler::startCampaignScenario(HighScoreParameter param, std::shared
 		highScoreCalc->isCampaign = true;
 		highScoreCalc->parameters.clear();
 	}
-	param.campaignName = cs->getName();
+	param.campaignName = cs->getNameTranslated();
 	highScoreCalc->parameters.push_back(param);
 
 	GH.dispatchMainThread([ourCampaign, this]()
@@ -712,7 +747,7 @@ void CServerHandler::startCampaignScenario(HighScoreParameter param, std::shared
 		auto & epilogue = ourCampaign->scenario(*ourCampaign->lastScenario()).epilog;
 		auto finisher = [=]()
 		{
-			if(ourCampaign->campaignSet != "")
+			if(ourCampaign->campaignSet != "" && ourCampaign->isCampaignFinished())
 			{
 				Settings entry = persistentStorage.write["completedCampaigns"][ourCampaign->getFilename()];
 				entry->Bool() = true;
@@ -885,7 +920,7 @@ void CServerHandler::threadHandleConnection()
 	try
 	{
 		sendClientConnecting();
-		while(c->connected)
+		while(c && c->connected)
 		{
 			while(state == EClientState::STARTING)
 				boost::this_thread::sleep_for(boost::chrono::milliseconds(10));
@@ -942,7 +977,7 @@ void CServerHandler::threadHandleConnection()
 
 void CServerHandler::visitForLobby(CPackForLobby & lobbyPack)
 {
-	if(applier->getApplier(typeList.getTypeID(&lobbyPack))->applyOnLobbyHandler(this, &lobbyPack))
+	if(applier->getApplier(CTypeList::getInstance().getTypeID(&lobbyPack))->applyOnLobbyHandler(this, &lobbyPack))
 	{
 		if(!settings["session"]["headless"].Bool())
 		{
@@ -1010,7 +1045,8 @@ void CServerHandler::threadRunServer()
 void CServerHandler::onServerFinished()
 {
 	threadRunLocalServer.reset();
-	CSH->campaignServerRestartLock.setn(false);
+	if (CSH)
+		CSH->campaignServerRestartLock.setn(false);
 }
 
 void CServerHandler::sendLobbyPack(const CPackForLobby & pack) const

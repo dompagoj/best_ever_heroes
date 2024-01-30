@@ -19,15 +19,44 @@
 #include "../CPlayerState.h"
 #include "../TerrainHandler.h"
 #include "../mapObjects/CGHeroInstance.h"
+#include "../mapObjects/CGTownInstance.h"
+#include "../mapObjects/MiscObjects.h"
 #include "../mapping/CMap.h"
+#include "spells/CSpellHandler.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
+
+bool CPathfinderHelper::canMoveFromNode(const PathNodeInfo & source) const
+{
+	// we can always make the first step, even when standing on object
+	if(source.node->theNodeBefore == nullptr)
+		return true;
+
+	if (!source.nodeObject)
+		return true;
+
+	if (!source.isNodeObjectVisitable())
+		return true;
+
+	// we can always move from visitable object if hero has teleported here (e.g. went through monolith)
+	if (source.node->isTeleportAction())
+		return true;
+
+	// we can not go through teleporters since moving onto a teleport will teleport hero and may invalidate path (e.g. one-way teleport or enemy hero on other side)
+	if (dynamic_cast<const CGTeleport*>(source.nodeObject) != nullptr)
+		return false;
+
+	return true;
+}
 
 std::vector<int3> CPathfinderHelper::getNeighbourTiles(const PathNodeInfo & source) const
 {
 	std::vector<int3> neighbourTiles;
-	neighbourTiles.reserve(8);
 
+	if (!canMoveFromNode(source))
+		return neighbourTiles;
+
+	neighbourTiles.reserve(8);
 	getNeighbours(
 		*source.tile,
 		source.node->coord,
@@ -37,7 +66,7 @@ std::vector<int3> CPathfinderHelper::getNeighbourTiles(const PathNodeInfo & sour
 
 	if(source.isNodeObjectVisitable())
 	{
-		vstd::erase_if(neighbourTiles, [&](const int3 & tile) -> bool 
+		vstd::erase_if(neighbourTiles, [&](const int3 & tile) -> bool
 		{
 			return !canMoveBetween(tile, source.nodeObject->visitablePos());
 		});
@@ -259,15 +288,18 @@ std::vector<int3> CPathfinderHelper::getTeleportExits(const PathNodeInfo & sourc
 			teleportationExits.push_back(exit);
 		}
 	}
-	else if(options.useCastleGate
-		&& (source.nodeObject->ID == Obj::TOWN && source.nodeObject->subID == ETownType::INFERNO
-		&& source.objectRelations != PlayerRelations::ENEMIES))
+	else if(options.useCastleGate && source.nodeObject->ID == Obj::TOWN && source.objectRelations != PlayerRelations::ENEMIES)
 	{
-		/// TODO: Find way to reuse CPlayerSpecificInfoCallback::getTownsInfo
-		/// This may be handy if we allow to use teleportation to friendly towns
-		for(const auto & exit : getCastleGates(source))
+		auto * town = dynamic_cast<const CGTownInstance *>(source.nodeObject);
+		assert(town);
+		if (town && town->getFaction() == FactionID::INFERNO)
 		{
-			teleportationExits.push_back(exit);
+			/// TODO: Find way to reuse CPlayerSpecificInfoCallback::getTownsInfo
+			/// This may be handy if we allow to use teleportation to friendly towns
+			for(const auto & exit : getCastleGates(source))
+			{
+				teleportationExits.push_back(exit);
+			}
 		}
 	}
 
@@ -298,7 +330,7 @@ bool CPathfinder::isLayerTransitionPossible() const
 	if(source.node->action == EPathNodeAction::BATTLE)
 		return false;
 
-	switch(source.node->layer)
+	switch(source.node->layer.toEnum())
 	{
 	case ELayer::LAND:
 		if(destLayer == ELayer::AIR)
@@ -367,7 +399,7 @@ void CPathfinderHelper::initializePatrol()
 		if(hero->patrol.patrolRadius)
 		{
 			state = PATROL_RADIUS;
-			gs->getTilesInRange(patrolTiles, hero->patrol.initialPos, hero->patrol.patrolRadius, std::optional<PlayerColor>(), 0, int3::DIST_MANHATTAN);
+			gs->getTilesInRange(patrolTiles, hero->patrol.initialPos, hero->patrol.patrolRadius, ETileVisibility::REVEALED, std::optional<PlayerColor>(), int3::DIST_MANHATTAN);
 		}
 		else
 			state = PATROL_LOCKED;
@@ -472,6 +504,12 @@ CPathfinderHelper::CPathfinderHelper(CGameState * gs, const CGHeroInstance * Her
 	turnsInfo.reserve(16);
 	updateTurnInfo();
 	initializePatrol();
+
+	SpellID flySpell = SpellID::FLY;
+	canCastFly = Hero->canCastThisSpell(flySpell.toSpell());
+
+	SpellID waterWalk = SpellID::WATER_WALK;
+	canCastWaterWalk = Hero->canCastThisSpell(waterWalk.toSpell());
 }
 
 CPathfinderHelper::~CPathfinderHelper()
@@ -495,17 +533,23 @@ void CPathfinderHelper::updateTurnInfo(const int Turn)
 
 bool CPathfinderHelper::isLayerAvailable(const EPathfindingLayer & layer) const
 {
-	switch(layer)
+	switch(layer.toEnum())
 	{
 	case EPathfindingLayer::AIR:
 		if(!options.useFlying)
 			return false;
+
+		if(canCastFly && options.canUseCast)
+			return true;
 
 		break;
 
 	case EPathfindingLayer::WATER:
 		if(!options.useWaterWalking)
 			return false;
+
+		if(canCastWaterWalk && options.canUseCast)
+			return true;
 
 		break;
 	}
@@ -518,9 +562,9 @@ const TurnInfo * CPathfinderHelper::getTurnInfo() const
 	return turnsInfo[turn];
 }
 
-bool CPathfinderHelper::hasBonusOfType(const BonusType type, const int subtype) const
+bool CPathfinderHelper::hasBonusOfType(const BonusType type) const
 {
-	return turnsInfo[turn]->hasBonusOfType(type, subtype);
+	return turnsInfo[turn]->hasBonusOfType(type);
 }
 
 int CPathfinderHelper::getMaxMovePoints(const EPathfindingLayer & layer) const

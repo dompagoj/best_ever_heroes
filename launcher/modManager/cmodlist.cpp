@@ -38,6 +38,9 @@ bool CModEntry::isEnabled() const
 	if(!isInstalled())
 		return false;
 
+	if (!isVisible())
+		return false;
+
 	return modSettings["active"].toBool();
 }
 
@@ -90,14 +93,32 @@ bool CModEntry::isInstalled() const
 	return !localData.isEmpty();
 }
 
-bool CModEntry::isValid() const
+bool CModEntry::isVisible() const
 {
-	return !localData.isEmpty() || !repository.isEmpty();
+	if (getBaseValue("modType").toString() == "Compatibility")
+	{
+		if (isSubmod())
+			return false;
+	}
+
+	if (getBaseValue("modType").toString() == "Translation")
+	{
+		// Do not show not installed translation mods to languages other than player language
+		if (localData.empty() && getBaseValue("language") != QString::fromStdString(settings["general"]["language"].String()) )
+			return false;
+	}
+
+	return !localData.isEmpty() || (!repository.isEmpty() && !repository.contains("mod"));
 }
 
 bool CModEntry::isTranslation() const
 {
-	return getBaseValue("modType").toString().toLower() == "translation";
+	return getBaseValue("modType").toString() == "Translation";
+}
+
+bool CModEntry::isSubmod() const
+{
+	return getName().contains('.');
 }
 
 int CModEntry::getModStatus() const
@@ -121,6 +142,22 @@ QString CModEntry::getName() const
 QVariant CModEntry::getValue(QString value) const
 {
 	return getValueImpl(value, true);
+}
+
+QStringList CModEntry::getDependencies() const
+{
+	QStringList result;
+	for (auto const & entry : getValue("depends").toStringList())
+		result.push_back(entry.toLower());
+	return result;
+}
+
+QStringList CModEntry::getConflicts() const
+{
+	QStringList result;
+	for (auto const & entry : getValue("conflicts").toStringList())
+		result.push_back(entry.toLower());
+	return result;
 }
 
 QVariant CModEntry::getBaseValue(QString value) const
@@ -163,7 +200,7 @@ QVariant CModEntry::getValueImpl(QString value, bool localized) const
 	return QVariant();
 }
 
-QVariantMap CModList::copyField(QVariantMap data, QString from, QString to)
+QVariantMap CModList::copyField(QVariantMap data, QString from, QString to) const
 {
 	QVariantMap renamed;
 
@@ -323,8 +360,8 @@ QStringList CModList::getRequirements(QString modname)
 	{
 		auto mod = getMod(modname);
 
-		for(auto entry : mod.getValue("depends").toStringList())
-			ret += getRequirements(entry);
+		for(auto entry : mod.getDependencies())
+			ret += getRequirements(entry.toLower());
 	}
 	ret += modname;
 

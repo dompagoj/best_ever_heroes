@@ -10,6 +10,7 @@
 #pragma once
 
 #include "CDefaultObjectTypeHandler.h"
+#include "../mapObjects/CGDwelling.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -33,13 +34,6 @@ public:
 
 	bool producesCreature(const CCreature * crea) const;
 	std::vector<const CCreature *> getProducedCreatures() const;
-
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & availableCreatures;
-		h & guards;
-		h & static_cast<CDefaultObjectTypeHandler<CGDwelling>&>(*this);
-	}
 };
 
 VCMI_LIB_NAMESPACE_END

@@ -127,6 +127,7 @@ class CHeroList	: public CList
 		void select(bool on) override;
 		void open() override;
 		void showTooltip() override;
+		void gesture(bool on, const Point & initialPosition, const Point & finalPosition) override;
 		std::string getHoverText() override;
 	};
 
@@ -160,6 +161,7 @@ class CTownList	: public CList
 		void select(bool on) override;
 		void open() override;
 		void showTooltip() override;
+		void gesture(bool on, const Point & initialPosition, const Point & finalPosition) override;
 		std::string getHoverText() override;
 	};
 

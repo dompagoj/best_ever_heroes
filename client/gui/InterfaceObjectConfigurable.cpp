@@ -56,6 +56,8 @@ InterfaceObjectConfigurable::InterfaceObjectConfigurable(int used, Point offset)
 	REGISTER_BUILDER("layout", &InterfaceObjectConfigurable::buildLayout);
 	REGISTER_BUILDER("comboBox", &InterfaceObjectConfigurable::buildComboBox);
 	REGISTER_BUILDER("textInput", &InterfaceObjectConfigurable::buildTextInput);
+	REGISTER_BUILDER("transparentFilledRectangle", &InterfaceObjectConfigurable::buildTransparentFilledRectangle);
+	REGISTER_BUILDER("textBox", &InterfaceObjectConfigurable::buildTextBox);
 }
 
 void InterfaceObjectConfigurable::registerBuilder(const std::string & type, BuilderFunction f)
@@ -196,7 +198,7 @@ ETextAlignment InterfaceObjectConfigurable::readTextAlignment(const JsonNode & c
 		if(config.String() == "right")
 			return ETextAlignment::BOTTOMRIGHT;
 	}
-	logGlobal->debug("Uknown text alignment attribute");
+	logGlobal->debug("Unknown text alignment attribute");
 	return ETextAlignment::CENTER;
 }
 
@@ -229,7 +231,7 @@ ColorRGBA InterfaceObjectConfigurable::readColor(const JsonNode & config) const
 				return ColorRGBA(asVector[0].Integer(), asVector[1].Integer(), asVector[2].Integer());
 		}
 	}
-	logGlobal->debug("Uknown color attribute");
+	logGlobal->debug("Unknown color attribute");
 	return Colors::DEFAULT_KEY_COLOR;
 
 }
@@ -238,7 +240,7 @@ PlayerColor InterfaceObjectConfigurable::readPlayerColor(const JsonNode & config
 {
 	logGlobal->debug("Reading PlayerColor");
 	if(!config.isNull() && config.isString())
-		return PlayerColor::decode(config.String());
+		return PlayerColor(PlayerColor::decode(config.String()));
 	
 	logGlobal->debug("Unknown PlayerColor attribute");
 	return PlayerColor::CANNOT_DETERMINE;
@@ -260,7 +262,7 @@ EFonts InterfaceObjectConfigurable::readFont(const JsonNode & config) const
 		if(config.String() == "calisto")
 			return EFonts::FONT_CALLI;
 	}
-	logGlobal->debug("Uknown font attribute");
+	logGlobal->debug("Unknown font attribute");
 	return EFonts::FONT_TIMES;
 }
 
@@ -299,7 +301,7 @@ EShortcut InterfaceObjectConfigurable::readHotkey(const JsonNode & config) const
 	EShortcut result = GH.shortcuts().findShortcut(config.String());
 	if (result == EShortcut::NONE)
 		logGlobal->error("Invalid hotkey '%s' in interface configuration!", config.String());
-	return result;;
+	return result;
 }
 
 std::shared_ptr<CPicture> InterfaceObjectConfigurable::buildPicture(const JsonNode & config) const
@@ -308,8 +310,6 @@ std::shared_ptr<CPicture> InterfaceObjectConfigurable::buildPicture(const JsonNo
 	auto image = ImagePath::fromJson(config["image"]);
 	auto position = readPosition(config["position"]);
 	auto pic = std::make_shared<CPicture>(image, position.x, position.y);
-	if(!config["visible"].isNull())
-		pic->visible = config["visible"].Bool();
 
 	if ( config["playerColored"].Bool() && LOCPLINT)
 		pic->colorize(LOCPLINT->playerID);
@@ -499,12 +499,25 @@ std::shared_ptr<CSlider> InterfaceObjectConfigurable::buildSlider(const JsonNode
 	auto position = readPosition(config["position"]);
 	int length = config["size"].Integer();
 	auto style = config["style"].String() == "brown" ? CSlider::BROWN : CSlider::BLUE;
-	auto itemsVisible = config["itemsVisible"].Integer();
-	auto itemsTotal = config["itemsTotal"].Integer();
 	auto value = config["selected"].Integer();
 	bool horizontal = config["orientation"].String() == "horizontal";
-	const auto & result =
-		std::make_shared<CSlider>(position, length, callbacks_int.at(config["callback"].String()), itemsVisible, itemsTotal, value, horizontal ? Orientation::HORIZONTAL : Orientation::VERTICAL, style);
+	auto orientation = horizontal ? Orientation::HORIZONTAL : Orientation::VERTICAL;
+
+	std::shared_ptr<CSlider> result;
+
+	if (config["items"].isNull())
+	{
+		auto itemsVisible = config["itemsVisible"].Integer();
+		auto itemsTotal = config["itemsTotal"].Integer();
+
+		result = std::make_shared<CSlider>(position, length, callbacks_int.at(config["callback"].String()), itemsVisible, itemsTotal, value, orientation, style);
+	}
+	else
+	{
+		auto items = config["items"].convertTo<std::vector<int>>();
+		result = std::make_shared<SliderNonlinear>(position, length, callbacks_int.at(config["callback"].String()), items, value, orientation, style);
+	}
+
 
 	if(!config["scrollBounds"].isNull())
 	{
@@ -538,6 +551,7 @@ std::shared_ptr<CFilledTexture> InterfaceObjectConfigurable::buildTexture(const 
 	{
 		auto result = std::make_shared<FilledTexturePlayerColored>(image, rect);
 		result->playerColored(playerColor);
+		return result;
 	}
 	return std::make_shared<CFilledTexture>(image, rect);
 }
@@ -546,9 +560,11 @@ std::shared_ptr<ComboBox> InterfaceObjectConfigurable::buildComboBox(const JsonN
 {
 	logGlobal->debug("Building widget ComboBox");
 	auto position = readPosition(config["position"]);
+	auto dropDownPosition = readPosition(config["dropDownPosition"]);
 	auto image = AnimationPath::fromJson(config["image"]);
 	auto help = readHintText(config["help"]);
-	auto result = std::make_shared<ComboBox>(position, image, help, config["dropDown"]);
+	auto result = std::make_shared<ComboBox>(position, image, help, config["dropDown"], dropDownPosition);
+
 	if(!config["items"].isNull())
 	{
 		for(const auto & item : config["items"].Vector())
@@ -684,6 +700,33 @@ std::shared_ptr<CShowableAnim> InterfaceObjectConfigurable::buildAnimation(const
 	return anim;
 }
 
+std::shared_ptr<TransparentFilledRectangle> InterfaceObjectConfigurable::buildTransparentFilledRectangle(const JsonNode & config) const
+{
+	logGlobal->debug("Building widget TransparentFilledRectangle");
+
+	auto rect = readRect(config["rect"]);
+	auto color = readColor(config["color"]);
+	if(!config["colorLine"].isNull())
+	{
+		auto colorLine = readColor(config["colorLine"]);
+		return std::make_shared<TransparentFilledRectangle>(rect, color, colorLine);
+	}
+	return std::make_shared<TransparentFilledRectangle>(rect, color);
+}
+
+std::shared_ptr<CTextBox> InterfaceObjectConfigurable::buildTextBox(const JsonNode & config) const
+{
+	logGlobal->debug("Building widget CTextBox");
+
+	auto rect = readRect(config["rect"]);
+	auto font = readFont(config["font"]);
+	auto alignment = readTextAlignment(config["alignment"]);
+	auto color = readColor(config["color"]);
+	auto text = readText(config["text"]);
+
+	return std::make_shared<CTextBox>(text, rect, 0, font, alignment, color);
+}
+
 std::shared_ptr<CIntObject> InterfaceObjectConfigurable::buildWidget(JsonNode config) const
 {
 	assert(!config.isNull());
@@ -691,7 +734,7 @@ std::shared_ptr<CIntObject> InterfaceObjectConfigurable::buildWidget(JsonNode co
 	//overrides from variables
 	for(auto & item : config["overrides"].Struct())
 	{
-		logGlobal->debug("Config attribute %s was overriden by variable %s", item.first, item.second.String());
+		logGlobal->debug("Config attribute %s was overridden by variable %s", item.first, item.second.String());
 		config[item.first] = variables[item.second.String()];
 	}
 	

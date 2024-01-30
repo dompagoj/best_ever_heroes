@@ -16,11 +16,13 @@
 #include "../widgets/Images.h"
 #include "../widgets/Buttons.h"
 #include "../widgets/ObjectLists.h"
+#include "../widgets/RadialMenu.h"
 #include "../windows/InfoWindows.h"
 #include "../CGameInfo.h"
 #include "../CPlayerInterface.h"
 #include "../PlayerLocalState.h"
 #include "../gui/CGuiHandler.h"
+#include "../gui/WindowHandler.h"
 #include "../render/Canvas.h"
 #include "../render/Colors.h"
 
@@ -220,13 +222,15 @@ CHeroList::CHeroItem::CHeroItem(CHeroList *parent, const CGHeroInstance * Hero)
 {
 	OBJECT_CONSTRUCTION_CAPTURING(255-DISPOSE);
 	movement = std::make_shared<CAnimImage>(AnimationPath::builtin("IMOBIL"), 0, 0, 0, 1);
-	portrait = std::make_shared<CAnimImage>(AnimationPath::builtin("PortraitsSmall"), hero->portrait, 0, movement->pos.w + 1);
+	portrait = std::make_shared<CAnimImage>(AnimationPath::builtin("PortraitsSmall"), hero->getIconIndex(), 0, movement->pos.w + 1);
 	mana = std::make_shared<CAnimImage>(AnimationPath::builtin("IMANA"), 0, 0, movement->pos.w + portrait->pos.w + 2, 1);
 
 	pos.w = mana->pos.w + mana->pos.x - pos.x;
 	pos.h = std::max(std::max<int>(movement->pos.h + 1, mana->pos.h + 1), portrait->pos.h);
 
 	update();
+
+	addUsedEvents(GESTURE);
 }
 
 void CHeroList::CHeroItem::update()
@@ -262,6 +266,41 @@ std::string CHeroList::CHeroItem::getHoverText()
 	return boost::str(boost::format(CGI->generaltexth->allTexts[15]) % hero->getNameTranslated() % hero->type->heroClass->getNameTranslated());
 }
 
+void CHeroList::CHeroItem::gesture(bool on, const Point & initialPosition, const Point & finalPosition)
+{
+	if(!on)
+		return;
+
+	if(!hero)
+		return;
+
+	auto & heroes = LOCPLINT->localState->getWanderingHeroes();
+
+	if(heroes.size() < 2)
+		return;
+
+	size_t heroPos = vstd::find_pos(heroes, hero);
+	const CGHeroInstance * heroUpper = (heroPos < 1) ? nullptr : heroes.at(heroPos - 1);
+	const CGHeroInstance * heroLower = (heroPos > heroes.size() - 2) ? nullptr : heroes.at(heroPos + 1);
+
+	std::vector<RadialMenuConfig> menuElements = {
+		{ RadialMenuConfig::ITEM_ALT_NN, heroUpper != nullptr, "altUpTop", "vcmi.radialWheel.moveTop", [heroPos]()
+		{
+			for (size_t i = heroPos; i > 0; i--)
+				LOCPLINT->localState->swapWanderingHero(i, i - 1);
+		} },
+		{ RadialMenuConfig::ITEM_ALT_NW, heroUpper != nullptr, "altUp", "vcmi.radialWheel.moveUp", [heroPos](){LOCPLINT->localState->swapWanderingHero(heroPos, heroPos - 1); } },
+		{ RadialMenuConfig::ITEM_ALT_SW, heroLower != nullptr, "altDown", "vcmi.radialWheel.moveDown", [heroPos](){ LOCPLINT->localState->swapWanderingHero(heroPos, heroPos + 1); } },
+		{ RadialMenuConfig::ITEM_ALT_SS, heroLower != nullptr, "altDownBottom", "vcmi.radialWheel.moveBottom", [heroPos, heroes]()
+		{
+			for (int i = heroPos; i < heroes.size() - 1; i++)
+				LOCPLINT->localState->swapWanderingHero(i, i + 1);
+		} },
+	};
+
+	GH.windows().createAndPushWindow<RadialMenu>(pos.center(), menuElements, true);
+}
+
 std::shared_ptr<CIntObject> CHeroList::createItem(size_t index)
 {
 	if (LOCPLINT->localState->getWanderingHeroes().size() > index)
@@ -287,18 +326,18 @@ void CHeroList::updateElement(const CGHeroInstance * hero)
 
 void CHeroList::updateWidget()
 {
-	auto & heroes = LOCPLINT->localState->getWanderingHeroes();
+	const auto & heroes = LOCPLINT->localState->getWanderingHeroes();
 
 	listBox->resize(heroes.size());
 
 	for (size_t i = 0; i < heroes.size(); ++i)
 	{
-		auto item =  std::dynamic_pointer_cast<CHeroItem>(listBox->getItem(i));
+		auto item = std::dynamic_pointer_cast<CHeroItem>(listBox->getItem(i));
 
 		if (!item)
 			continue;
 
-		if (item->hero == heroes[i])
+		if (item->hero == heroes.at(i))
 		{
 			item->update();
 		}
@@ -330,6 +369,8 @@ CTownList::CTownItem::CTownItem(CTownList *parent, const CGTownInstance *Town):
 	picture = std::make_shared<CAnimImage>(AnimationPath::builtin("ITPA"), 0);
 	pos = picture->pos;
 	update();
+
+	addUsedEvents(GESTURE);
 }
 
 std::shared_ptr<CIntObject> CTownList::CTownItem::genSelection()
@@ -361,6 +402,41 @@ void CTownList::CTownItem::showTooltip()
 	CRClickPopup::createAndPush(town, GH.getCursorPosition());
 }
 
+void CTownList::CTownItem::gesture(bool on, const Point & initialPosition, const Point & finalPosition)
+{
+	if(!on)
+		return;
+
+	const std::vector<const CGTownInstance *> towns = LOCPLINT->localState->getOwnedTowns();
+	size_t townIndex = vstd::find_pos(towns, town);
+
+	if(townIndex + 1 > towns.size() || !towns.at(townIndex))
+		return;
+
+	if(towns.size() < 2)
+		return;
+
+	int townUpperPos = (townIndex < 1) ? -1 : townIndex - 1;
+	int townLowerPos = (townIndex > towns.size() - 2) ? -1 : townIndex + 1;
+
+	std::vector<RadialMenuConfig> menuElements = {
+		{ RadialMenuConfig::ITEM_ALT_NN, townUpperPos > -1, "altUpTop", "vcmi.radialWheel.moveTop", [townIndex]()
+		{
+			for (int i = townIndex; i > 0; i--)
+				LOCPLINT->localState->swapOwnedTowns(i, i - 1);
+		} },
+		{ RadialMenuConfig::ITEM_ALT_NW, townUpperPos > -1, "altUp", "vcmi.radialWheel.moveUp", [townIndex, townUpperPos](){LOCPLINT->localState->swapOwnedTowns(townIndex, townUpperPos); } },
+		{ RadialMenuConfig::ITEM_ALT_SW, townLowerPos > -1, "altDown", "vcmi.radialWheel.moveDown", [townIndex, townLowerPos](){ LOCPLINT->localState->swapOwnedTowns(townIndex, townLowerPos); } },
+		{ RadialMenuConfig::ITEM_ALT_SS, townLowerPos > -1, "altDownBottom", "vcmi.radialWheel.moveBottom", [townIndex, towns]()
+		{
+			for (int i = townIndex; i < towns.size() - 1; i++)
+				LOCPLINT->localState->swapOwnedTowns(i, i + 1);
+		} },
+	};
+
+	GH.windows().createAndPushWindow<RadialMenu>(pos.center(), menuElements, true);
+}
+
 std::string CTownList::CTownItem::getHoverText()
 {
 	return town->getObjectName();
@@ -390,7 +466,7 @@ void CTownList::updateWidget()
 
 	for (size_t i = 0; i < towns.size(); ++i)
 	{
-		auto item =  std::dynamic_pointer_cast<CTownItem>(listBox->getItem(i));
+		auto item = std::dynamic_pointer_cast<CTownItem>(listBox->getItem(i));
 
 		if (!item)
 			continue;

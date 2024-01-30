@@ -18,16 +18,27 @@
 
 VCMI_LIB_NAMESPACE_BEGIN
 
+void Rewardable::RewardRevealTiles::serializeJson(JsonSerializeFormat & handler)
+{
+	handler.serializeBool("hide", hide);
+	handler.serializeInt("scoreSurface", scoreSurface);
+	handler.serializeInt("scoreSubterra", scoreSubterra);
+	handler.serializeInt("scoreWater", scoreWater);
+	handler.serializeInt("scoreRock", scoreRock);
+	handler.serializeInt("radius", radius);
+}
+
 Rewardable::Reward::Reward()
 	: heroExperience(0)
 	, heroLevel(0)
 	, manaDiff(0)
 	, manaPercentage(-1)
+	, manaOverflowFactor(0)
 	, movePoints(0)
 	, movePercentage(-1)
 	, primary(4, 0)
 	, removeObject(false)
-	, spellCast(SpellID::NONE, SecSkillLevel::NONE)
+	, spellCast(SpellID::NONE, MasteryLevel::NONE)
 {
 }
 
@@ -56,8 +67,7 @@ Component Rewardable::Reward::getDisplayedComponent(const CGHeroInstance * h) co
 	return comps.front();
 }
 
-void Rewardable::Reward::loadComponents(std::vector<Component> & comps,
-								 const CGHeroInstance * h) const
+void Rewardable::Reward::loadComponents(std::vector<Component> & comps, const CGHeroInstance * h) const
 {
 	for (auto comp : extraComponents)
 		comps.push_back(comp);
@@ -65,43 +75,42 @@ void Rewardable::Reward::loadComponents(std::vector<Component> & comps,
 	for (auto & bonus : bonuses)
 	{
 		if (bonus.type == BonusType::MORALE)
-			comps.emplace_back(Component::EComponentType::MORALE, 0, bonus.val, 0);
+			comps.emplace_back(ComponentType::MORALE, bonus.val);
 		if (bonus.type == BonusType::LUCK)
-			comps.emplace_back(Component::EComponentType::LUCK, 0, bonus.val, 0);
+			comps.emplace_back(ComponentType::LUCK, bonus.val);
 	}
 	
 	if (heroExperience)
-	{
-		comps.emplace_back(Component::EComponentType::EXPERIENCE, 0, static_cast<si32>(h->calculateXp(heroExperience)), 0);
-	}
+		comps.emplace_back(ComponentType::EXPERIENCE, static_cast<si32>(h ? h->calculateXp(heroExperience) : heroExperience));
+
 	if (heroLevel)
-		comps.emplace_back(Component::EComponentType::EXPERIENCE, 1, heroLevel, 0);
+		comps.emplace_back(ComponentType::LEVEL, heroLevel);
 
 	if (manaDiff || manaPercentage >= 0)
-		comps.emplace_back(Component::EComponentType::PRIM_SKILL, 5, calculateManaPoints(h) - h->mana, 0);
+		comps.emplace_back(ComponentType::MANA, h ? (calculateManaPoints(h) - h->mana) : manaDiff);
 
 	for (size_t i=0; i<primary.size(); i++)
 	{
 		if (primary[i] != 0)
-			comps.emplace_back(Component::EComponentType::PRIM_SKILL, static_cast<ui16>(i), primary[i], 0);
+			comps.emplace_back(ComponentType::PRIM_SKILL, PrimarySkill(i), primary[i]);
 	}
 
 	for(const auto & entry : secondary)
-		comps.emplace_back(Component::EComponentType::SEC_SKILL, entry.first, entry.second, 0);
+		comps.emplace_back(ComponentType::SEC_SKILL, entry.first, entry.second);
 
 	for(const auto & entry : artifacts)
-		comps.emplace_back(Component::EComponentType::ARTIFACT, entry, 1, 0);
+		comps.emplace_back(ComponentType::ARTIFACT, entry);
 
 	for(const auto & entry : spells)
-		comps.emplace_back(Component::EComponentType::SPELL, entry, 1, 0);
+		comps.emplace_back(ComponentType::SPELL, entry);
 
 	for(const auto & entry : creatures)
-		comps.emplace_back(Component::EComponentType::CREATURE, entry.type->getId(), entry.count, 0);
+		comps.emplace_back(ComponentType::CREATURE, entry.type->getId(), entry.count);
 
 	for (size_t i=0; i<resources.size(); i++)
 	{
 		if (resources[i] !=0)
-			comps.emplace_back(Component::EComponentType::RESOURCE, static_cast<ui16>(i), resources[i], 0);
+			comps.emplace_back(ComponentType::RESOURCE, GameResID(i), resources[i]);
 	}
 }
 
@@ -125,7 +134,7 @@ void Rewardable::Reward::serializeJson(JsonSerializeFormat & handler)
 		std::vector<std::pair<SecondarySkill, si32>> fieldValue(secondary.begin(), secondary.end());
 		a.serializeStruct<std::pair<SecondarySkill, si32>>(fieldValue, [](JsonSerializeFormat & h, std::pair<SecondarySkill, si32> & e)
 		{
-			h.serializeId("skill", e.first, SecondarySkill{}, VLC->skillh->decodeSkill, VLC->skillh->encodeSkill);
+			h.serializeId("skill", e.first);
 			h.serializeId("level", e.second, 0, [](const std::string & i){return vstd::find_pos(NSecondarySkill::levels, i);}, [](si32 i){return NSecondarySkill::levels.at(i);});
 		});
 		a.syncSize(fieldValue);

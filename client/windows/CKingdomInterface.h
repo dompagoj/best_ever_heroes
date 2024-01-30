@@ -200,7 +200,7 @@ public:
 };
 
 /// Class which holds all parts of kingdom overview window
-class CKingdomInterface : public CWindowObject, public IGarrisonHolder, public CArtifactHolder
+class CKingdomInterface : public CWindowObject, public IGarrisonHolder, public CArtifactHolder, public ITownHolder
 {
 private:
 	struct OwnedObjectInfo
@@ -253,10 +253,12 @@ public:
 	void townChanged(const CGTownInstance *town);
 	void heroRemoved();
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 	void artifactRemoved(const ArtifactLocation &artLoc) override;
 	void artifactMoved(const ArtifactLocation &artLoc, const ArtifactLocation &destLoc, bool withRedraw) override;
 	void artifactDisassembled(const ArtifactLocation &artLoc) override;
 	void artifactAssembled(const ArtifactLocation &artLoc) override;
+	void buildChanged() override;
 };
 
 /// List item with town
@@ -277,12 +279,19 @@ class CTownItem : public CIntObject, public IGarrisonHolder
 
 	std::shared_ptr<LRClickableAreaOpenTown> openTown;
 
+	std::shared_ptr<CButton> fastTownHall;
+	std::shared_ptr<CButton> fastArmyPurchase;
+	std::shared_ptr<LRClickableArea> fastMarket;
+	std::shared_ptr<LRClickableArea> fastTavern;
+	std::shared_ptr<LRClickableArea> fastTown;
+
 public:
 	const CGTownInstance * town;
 
 	CTownItem(const CGTownInstance * Town);
 
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 	void update();
 };
 
@@ -315,6 +324,7 @@ public:
 	std::shared_ptr<CArtifactsOfHeroKingdom> heroArts;
 
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 
 	CHeroItem(const CGHeroInstance * hero);
 };
@@ -333,6 +343,7 @@ public:
 	CKingdHeroList(size_t maxSize);
 
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 };
 
 /// Tab with all town-specific data
@@ -351,4 +362,5 @@ public:
 
 	void townChanged(const CGTownInstance * town);
 	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 };

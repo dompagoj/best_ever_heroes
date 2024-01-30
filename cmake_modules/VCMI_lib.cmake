@@ -2,7 +2,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 	if(NOT DEFINED MAIN_LIB_DIR)
 		set(MAIN_LIB_DIR "${CMAKE_SOURCE_DIR}/lib")
 	endif()
-	
+
 	set(lib_SRCS
 		${MAIN_LIB_DIR}/StdInc.cpp
 
@@ -31,6 +31,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/bonuses/BonusList.cpp
 		${MAIN_LIB_DIR}/bonuses/BonusParams.cpp
 		${MAIN_LIB_DIR}/bonuses/BonusSelector.cpp
+		${MAIN_LIB_DIR}/bonuses/BonusCustomTypes.cpp
 		${MAIN_LIB_DIR}/bonuses/CBonusProxy.cpp
 		${MAIN_LIB_DIR}/bonuses/CBonusSystemNode.cpp
 		${MAIN_LIB_DIR}/bonuses/IBonusBearer.cpp
@@ -81,7 +82,6 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/mapObjectConstructors/DwellingInstanceConstructor.cpp
 		${MAIN_LIB_DIR}/mapObjectConstructors/HillFortInstanceConstructor.cpp
 		${MAIN_LIB_DIR}/mapObjectConstructors/ShipyardInstanceConstructor.cpp
-		${MAIN_LIB_DIR}/mapObjectConstructors/ShrineInstanceConstructor.cpp
 
 		${MAIN_LIB_DIR}/mapObjects/CArmedInstance.cpp
 		${MAIN_LIB_DIR}/mapObjects/CBank.cpp
@@ -116,6 +116,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/mapping/MapFormatJson.cpp
 		${MAIN_LIB_DIR}/mapping/ObstacleProxy.cpp
 
+		${MAIN_LIB_DIR}/modding/ActiveModsInSaveList.cpp
 		${MAIN_LIB_DIR}/modding/CModHandler.cpp
 		${MAIN_LIB_DIR}/modding/CModInfo.cpp
 		${MAIN_LIB_DIR}/modding/CModVersion.cpp
@@ -123,21 +124,14 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/modding/IdentifierStorage.cpp
 		${MAIN_LIB_DIR}/modding/ModUtility.cpp
 
+		${MAIN_LIB_DIR}/networkPacks/NetPacksLib.cpp
+
 		${MAIN_LIB_DIR}/pathfinder/CGPathNode.cpp
 		${MAIN_LIB_DIR}/pathfinder/CPathfinder.cpp
 		${MAIN_LIB_DIR}/pathfinder/NodeStorage.cpp
 		${MAIN_LIB_DIR}/pathfinder/PathfinderOptions.cpp
 		${MAIN_LIB_DIR}/pathfinder/PathfindingRules.cpp
 		${MAIN_LIB_DIR}/pathfinder/TurnInfo.cpp
-
-		${MAIN_LIB_DIR}/registerTypes/RegisterTypes.cpp
-		${MAIN_LIB_DIR}/registerTypes/TypesClientPacks1.cpp
-		${MAIN_LIB_DIR}/registerTypes/TypesClientPacks2.cpp
-		${MAIN_LIB_DIR}/registerTypes/TypesMapObjects1.cpp
-		${MAIN_LIB_DIR}/registerTypes/TypesMapObjects2.cpp
-		${MAIN_LIB_DIR}/registerTypes/TypesMapObjects3.cpp
-		${MAIN_LIB_DIR}/registerTypes/TypesLobbyPacks.cpp
-		${MAIN_LIB_DIR}/registerTypes/TypesServerPacks.cpp
 
 		${MAIN_LIB_DIR}/rewardable/Configuration.cpp
 		${MAIN_LIB_DIR}/rewardable/Info.cpp
@@ -162,6 +156,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/rmg/modificators/ObjectDistributor.cpp
 		${MAIN_LIB_DIR}/rmg/modificators/RoadPlacer.cpp
 		${MAIN_LIB_DIR}/rmg/modificators/TreasurePlacer.cpp
+		${MAIN_LIB_DIR}/rmg/modificators/PrisonHeroPlacer.cpp
 		${MAIN_LIB_DIR}/rmg/modificators/QuestArtifactPlacer.cpp
 		${MAIN_LIB_DIR}/rmg/modificators/ConnectionsPlacer.cpp
 		${MAIN_LIB_DIR}/rmg/modificators/WaterAdopter.cpp
@@ -178,16 +173,16 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 
 		${MAIN_LIB_DIR}/serializer/BinaryDeserializer.cpp
 		${MAIN_LIB_DIR}/serializer/BinarySerializer.cpp
-		${MAIN_LIB_DIR}/serializer/CLoadIntegrityValidator.cpp
+		${MAIN_LIB_DIR}/serializer/CLoadFile.cpp
 		${MAIN_LIB_DIR}/serializer/CMemorySerializer.cpp
 		${MAIN_LIB_DIR}/serializer/Connection.cpp
+		${MAIN_LIB_DIR}/serializer/CSaveFile.cpp
 		${MAIN_LIB_DIR}/serializer/CSerializer.cpp
 		${MAIN_LIB_DIR}/serializer/CTypeList.cpp
 		${MAIN_LIB_DIR}/serializer/JsonDeserializer.cpp
 		${MAIN_LIB_DIR}/serializer/JsonSerializeFormat.cpp
 		${MAIN_LIB_DIR}/serializer/JsonSerializer.cpp
 		${MAIN_LIB_DIR}/serializer/JsonUpdater.cpp
-		${MAIN_LIB_DIR}/serializer/ILICReader.cpp
 
 		${MAIN_LIB_DIR}/spells/AbilityCaster.cpp
 		${MAIN_LIB_DIR}/spells/AdventureSpellMechanics.cpp
@@ -255,7 +250,6 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/JsonRandom.cpp
 		${MAIN_LIB_DIR}/LoadProgress.cpp
 		${MAIN_LIB_DIR}/LogicalExpression.cpp
-		${MAIN_LIB_DIR}/NetPacksLib.cpp
 		${MAIN_LIB_DIR}/MetaString.cpp
 		${MAIN_LIB_DIR}/ObstacleHandler.cpp
 		${MAIN_LIB_DIR}/StartInfo.cpp
@@ -270,13 +264,13 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/VCMI_Lib.cpp
 	)
 
-	# Version.cpp is a generated file
+    # Version.cpp is a generated file
 	if(ENABLE_GITVERSION)
 		list(APPEND lib_SRCS ${CMAKE_BINARY_DIR}/Version.cpp)
 		set_source_files_properties(${CMAKE_BINARY_DIR}/Version.cpp
 			PROPERTIES GENERATED TRUE
 		)
-	endif()
+    endif()
 
 	set(lib_HEADERS
 		${MAIN_LIB_DIR}/../include/vstd/CLoggerBase.h
@@ -358,6 +352,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/bonuses/BonusList.h
 		${MAIN_LIB_DIR}/bonuses/BonusParams.h
 		${MAIN_LIB_DIR}/bonuses/BonusSelector.h
+		${MAIN_LIB_DIR}/bonuses/BonusCustomTypes.h
 		${MAIN_LIB_DIR}/bonuses/CBonusProxy.h
 		${MAIN_LIB_DIR}/bonuses/CBonusSystemNode.h
 		${MAIN_LIB_DIR}/bonuses/IBonusBearer.h
@@ -372,6 +367,8 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 
 		${MAIN_LIB_DIR}/constants/EntityIdentifiers.h
 		${MAIN_LIB_DIR}/constants/Enumerations.h
+		${MAIN_LIB_DIR}/constants/IdentifierBase.h
+		${MAIN_LIB_DIR}/constants/VariantIdentifier.h
 		${MAIN_LIB_DIR}/constants/NumericConstants.h
 		${MAIN_LIB_DIR}/constants/StringConstants.h
 
@@ -425,7 +422,6 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/mapObjectConstructors/IObjectInfo.h
 		${MAIN_LIB_DIR}/mapObjectConstructors/RandomMapInfo.h
 		${MAIN_LIB_DIR}/mapObjectConstructors/ShipyardInstanceConstructor.h
-		${MAIN_LIB_DIR}/mapObjectConstructors/ShrineInstanceConstructor.h
 		${MAIN_LIB_DIR}/mapObjectConstructors/SObjectSounds.h
 
 		${MAIN_LIB_DIR}/mapObjects/CArmedInstance.h
@@ -464,6 +460,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/mapping/MapFormatJson.h
 		${MAIN_LIB_DIR}/mapping/ObstacleProxy.h
 
+		${MAIN_LIB_DIR}/modding/ActiveModsInSaveList.h
 		${MAIN_LIB_DIR}/modding/CModHandler.h
 		${MAIN_LIB_DIR}/modding/CModInfo.h
 		${MAIN_LIB_DIR}/modding/CModVersion.h
@@ -472,6 +469,24 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/modding/ModIncompatibility.h
 		${MAIN_LIB_DIR}/modding/ModScope.h
 		${MAIN_LIB_DIR}/modding/ModUtility.h
+		${MAIN_LIB_DIR}/modding/ModVerificationInfo.h
+
+		${MAIN_LIB_DIR}/networkPacks/ArtifactLocation.h
+		${MAIN_LIB_DIR}/networkPacks/BattleChanges.h
+		${MAIN_LIB_DIR}/networkPacks/Component.h
+		${MAIN_LIB_DIR}/networkPacks/EInfoWindowMode.h
+		${MAIN_LIB_DIR}/networkPacks/EntityChanges.h
+		${MAIN_LIB_DIR}/networkPacks/EOpenWindowMode.h
+		${MAIN_LIB_DIR}/networkPacks/NetPacksBase.h
+		${MAIN_LIB_DIR}/networkPacks/NetPackVisitor.h
+		${MAIN_LIB_DIR}/networkPacks/ObjProperty.h
+		${MAIN_LIB_DIR}/networkPacks/PacksForClient.h
+		${MAIN_LIB_DIR}/networkPacks/PacksForClientBattle.h
+		${MAIN_LIB_DIR}/networkPacks/PacksForLobby.h
+		${MAIN_LIB_DIR}/networkPacks/PacksForServer.h
+		${MAIN_LIB_DIR}/networkPacks/SetStackEffect.h
+		${MAIN_LIB_DIR}/networkPacks/StackLocation.h
+		${MAIN_LIB_DIR}/networkPacks/TradeItem.h
 
 		${MAIN_LIB_DIR}/pathfinder/INodeStorage.h
 		${MAIN_LIB_DIR}/pathfinder/CGPathNode.h
@@ -483,6 +498,10 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/pathfinder/TurnInfo.h
 
 		${MAIN_LIB_DIR}/registerTypes/RegisterTypes.h
+		${MAIN_LIB_DIR}/registerTypes/RegisterTypesClientPacks.h
+		${MAIN_LIB_DIR}/registerTypes/RegisterTypesLobbyPacks.h
+		${MAIN_LIB_DIR}/registerTypes/RegisterTypesMapObjects.h
+		${MAIN_LIB_DIR}/registerTypes/RegisterTypesServerPacks.h
 
 		${MAIN_LIB_DIR}/rewardable/Configuration.h
 		${MAIN_LIB_DIR}/rewardable/Info.h
@@ -508,6 +527,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/rmg/modificators/ObjectDistributor.h
 		${MAIN_LIB_DIR}/rmg/modificators/RoadPlacer.h
 		${MAIN_LIB_DIR}/rmg/modificators/TreasurePlacer.h
+		${MAIN_LIB_DIR}/rmg/modificators/PrisonHeroPlacer.h
 		${MAIN_LIB_DIR}/rmg/modificators/QuestArtifactPlacer.h
 		${MAIN_LIB_DIR}/rmg/modificators/ConnectionsPlacer.h
 		${MAIN_LIB_DIR}/rmg/modificators/WaterAdopter.h
@@ -526,17 +546,18 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 
 		${MAIN_LIB_DIR}/serializer/BinaryDeserializer.h
 		${MAIN_LIB_DIR}/serializer/BinarySerializer.h
-		${MAIN_LIB_DIR}/serializer/CLoadIntegrityValidator.h
+		${MAIN_LIB_DIR}/serializer/CLoadFile.h
 		${MAIN_LIB_DIR}/serializer/CMemorySerializer.h
 		${MAIN_LIB_DIR}/serializer/Connection.h
+		${MAIN_LIB_DIR}/serializer/CSaveFile.h
 		${MAIN_LIB_DIR}/serializer/CSerializer.h
 		${MAIN_LIB_DIR}/serializer/CTypeList.h
 		${MAIN_LIB_DIR}/serializer/JsonDeserializer.h
 		${MAIN_LIB_DIR}/serializer/JsonSerializeFormat.h
 		${MAIN_LIB_DIR}/serializer/JsonSerializer.h
 		${MAIN_LIB_DIR}/serializer/JsonUpdater.h
-		${MAIN_LIB_DIR}/serializer/ILICReader.h
 		${MAIN_LIB_DIR}/serializer/Cast.h
+		${MAIN_LIB_DIR}/serializer/ESerializationVersion.h
 
 		${MAIN_LIB_DIR}/spells/AbilityCaster.h
 		${MAIN_LIB_DIR}/spells/AdventureSpellMechanics.h
@@ -598,7 +619,9 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/CStopWatch.h
 		${MAIN_LIB_DIR}/CThreadHelper.h
 		${MAIN_LIB_DIR}/CTownHandler.h
+		${MAIN_LIB_DIR}/ExtraOptionsInfo.h
 		${MAIN_LIB_DIR}/FunctionList.h
+		${MAIN_LIB_DIR}/GameCallbackHolder.h
 		${MAIN_LIB_DIR}/GameConstants.h
 		${MAIN_LIB_DIR}/GameSettings.h
 		${MAIN_LIB_DIR}/IBonusTypeHandler.h
@@ -613,10 +636,6 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/LoadProgress.h
 		${MAIN_LIB_DIR}/LogicalExpression.h
 		${MAIN_LIB_DIR}/MetaString.h
-		${MAIN_LIB_DIR}/NetPacksBase.h
-		${MAIN_LIB_DIR}/NetPacks.h
-		${MAIN_LIB_DIR}/NetPacksLobby.h
-		${MAIN_LIB_DIR}/NetPackVisitor.h
 		${MAIN_LIB_DIR}/ObstacleHandler.h
 		${MAIN_LIB_DIR}/Point.h
 		${MAIN_LIB_DIR}/Rect.h
@@ -636,7 +655,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		${MAIN_LIB_DIR}/VCMI_Lib.h
 	)
 
-	assign_source_group(${lib_SRCS} ${lib_HEADERS})
+    assign_source_group(${lib_SRCS} ${lib_HEADERS})
 
 	add_library(${TARGET_NAME} ${LIBRARY_TYPE} ${lib_SRCS} ${lib_HEADERS})
 	set_target_properties(${TARGET_NAME} PROPERTIES COMPILE_DEFINITIONS "VCMI_DLL=1")
@@ -644,7 +663,7 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		minizip::minizip ZLIB::ZLIB
 		${SYSTEM_LIBS} Boost::boost Boost::thread Boost::filesystem Boost::program_options Boost::locale Boost::date_time
 	)
-	if(APPLE_IOS)
+    if(APPLE_IOS)
 		target_link_libraries(${TARGET_NAME} PUBLIC iOS_utils)
 	endif()
 
@@ -655,13 +674,13 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		PUBLIC ${MAIN_LIB_DIR}
 	)
 
-	if(WIN32)
+    if(WIN32)
 		set_target_properties(${TARGET_NAME}
 			PROPERTIES
-				OUTPUT_NAME "VCMI_lib"
+			    OUTPUT_NAME "VCMI_lib"
 				PROJECT_LABEL "VCMI_lib"
 		)
-	endif()
+    endif()
 
 	vcmi_set_output_dir(${TARGET_NAME} "")
 
@@ -672,10 +691,10 @@ macro(add_main_lib TARGET_NAME LIBRARY_TYPE)
 		add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/config
 			COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/Mods
-			COMMAND ${CMAKE_COMMAND} -E copy_directory ${MAIN_LIB_DIR}/../config ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/config
-			COMMAND ${CMAKE_COMMAND} -E copy_directory ${MAIN_LIB_DIR}/../Mods ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/Mods
+			COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake_modules/create_link.cmake ${MAIN_LIB_DIR}/../config ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/config
+			COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake_modules/create_link.cmake ${MAIN_LIB_DIR}/../Mods ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/Mods
 		)
-	endif()
+    endif()
 
 	# Update version before vcmi compiling
 	if(TARGET update_version)

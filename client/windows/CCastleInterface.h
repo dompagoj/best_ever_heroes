@@ -36,6 +36,7 @@ class CTownList;
 class CGarrisonInt;
 class CComponent;
 class CComponentBox;
+class LRClickableArea;
 
 /// Building "button"
 class CBuildingRect : public CShowableAnim
@@ -112,6 +113,7 @@ public:
 	void set(const CGHeroInstance * newHero);
 
 	void hover (bool on) override;
+	void gesture(bool on, const Point & initialPosition, const Point & finalPosition) override;
 	void clickPressed(const Point & cursorPosition) override;
 	void showPopupWindow(const Point & cursorPosition) override;
 	void deactivate() override;
@@ -154,8 +156,7 @@ class CCastleBuildings : public CIntObject
 	void enterCastleGate();
 	void enterFountain(const BuildingID & building, BuildingSubID::EBuildingSubID subID, BuildingID upgrades);//Rampart's fountains
 	void enterMagesGuild();
-	void enterTownHall();
-
+	
 	void openMagesGuild();
 	void openTownHall();
 
@@ -167,6 +168,7 @@ public:
 	~CCastleBuildings();
 
 	void enterDwelling(int level);
+	void enterTownHall();
 	void enterToTheQuickRecruitmentWindow();
 
 	void buildingClicked(BuildingID building, BuildingSubID::EBuildingSubID subID = BuildingSubID::NONE, BuildingID upgrades = BuildingID::NONE);
@@ -226,7 +228,10 @@ class CCastleInterface : public CStatusbarWindow, public IGarrisonHolder
 
 	std::shared_ptr<CButton> exit;
 	std::shared_ptr<CButton> split;
+	std::shared_ptr<CButton> fastTownHall;
 	std::shared_ptr<CButton> fastArmyPurchase;
+	std::shared_ptr<LRClickableArea> fastMarket;
+	std::shared_ptr<LRClickableArea> fastTavern;
 
 	std::vector<std::shared_ptr<CCreaInfo>> creainfo;//small icons of creatures (bottom-left corner);
 
@@ -244,13 +249,14 @@ public:
 	CCastleInterface(const CGTownInstance * Town, const CGTownInstance * from = nullptr);
 	~CCastleInterface();
 
-	virtual void updateGarrisons() override;
+	void updateGarrisons() override;
+	bool holdsGarrison(const CArmedInstance * army) override;
 
 	void castleTeleport(int where);
 	void townChange();
 	void keyPressed(EShortcut key) override;
 
-	void close();
+	void close() override;
 	void addBuilding(BuildingID bid);
 	void removeBuilding(BuildingID bid);
 	void recreateIcons();

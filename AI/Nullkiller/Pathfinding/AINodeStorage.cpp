@@ -35,6 +35,8 @@ const uint64_t MIN_ARMY_STRENGTH_FOR_CHAIN = 5000;
 const uint64_t MIN_ARMY_STRENGTH_FOR_NEXT_ACTOR = 1000;
 const uint64_t CHAIN_MAX_DEPTH = 4;
 
+const bool DO_NOT_SAVE_TO_COMMITED_TILES = false;
+
 AISharedStorage::AISharedStorage(int3 sizes)
 {
 	if(!shared){
@@ -90,7 +92,7 @@ void AINodeStorage::initialize(const PathfinderOptions & options, const CGameSta
 
 	//TODO: fix this code duplication with NodeStorage::initialize, problem is to keep `resetTile` inline
 	const PlayerColor fowPlayer = ai->playerID;
-	const auto fow = static_cast<const CGameInfoCallback *>(gs)->getPlayerTeam(fowPlayer)->fogOfWarMap;
+	const auto & fow = static_cast<const CGameInfoCallback *>(gs)->getPlayerTeam(fowPlayer)->fogOfWarMap;
 	const int3 sizes = gs->getMapSize();
 
 	//Each thread gets different x, but an array of y located next to each other in memory
@@ -234,6 +236,7 @@ void AINodeStorage::resetTile(const int3 & coord, EPathfindingLayer layer, EPath
 		heroNode.specialAction.reset();
 		heroNode.armyLoss = 0;
 		heroNode.chainOther = nullptr;
+		heroNode.dayFlags = DayFlags::NONE;
 		heroNode.update(coord, layer, accessibility);
 	}
 }
@@ -265,7 +268,8 @@ void AINodeStorage::commit(
 	EPathNodeAction action, 
 	int turn, 
 	int movementLeft, 
-	float cost) const
+	float cost,
+	bool saveToCommited) const
 {
 	destination->action = action;
 	destination->setCost(cost);
@@ -279,9 +283,10 @@ void AINodeStorage::commit(
 
 #if NKAI_PATHFINDER_TRACE_LEVEL >= 2
 	logAi->trace(
-		"Commited %s -> %s, cost: %f, turn: %s, mp: %d, hero: %s, mask: %x, army: %lld",
+		"Commited %s -> %s, layer: %d, cost: %f, turn: %s, mp: %d, hero: %s, mask: %x, army: %lld",
 		source->coord.toString(),
 		destination->coord.toString(),
+		destination->layer,
 		destination->getCost(),
 		std::to_string(destination->turns),
 		destination->moveRemains,
@@ -290,9 +295,14 @@ void AINodeStorage::commit(
 		destination->actor->armyValue);
 #endif
 
-	if(destination->turns <= heroChainTurn)
+	if(saveToCommited && destination->turns <= heroChainTurn)
 	{
 		commitedTiles.insert(destination->coord);
+	}
+
+	if(destination->turns == source->turns)
+	{
+		destination->dayFlags = source->dayFlags;
 	}
 }
 
@@ -777,7 +787,14 @@ void HeroChainCalculationTask::addHeroChain(const std::vector<ExchangeCandidate>
 			continue;
 		}
 
-		storage.commit(exchangeNode, carrier, carrier->action, chainInfo.turns, chainInfo.moveRemains, chainInfo.getCost());
+		storage.commit(
+			exchangeNode,
+			carrier,
+			carrier->action,
+			chainInfo.turns,
+			chainInfo.moveRemains, 
+			chainInfo.getCost(),
+			DO_NOT_SAVE_TO_COMMITED_TILES);
 
 		if(carrier->specialAction || carrier->chainOther)
 		{
@@ -983,7 +1000,7 @@ std::vector<CGPathNode *> AINodeStorage::calculateTeleportations(
 struct TowmPortalFinder
 {
 	const std::vector<CGPathNode *> & initialNodes;
-	SecSkillLevel::SecSkillLevel townPortalSkillLevel;
+	MasteryLevel::Type townPortalSkillLevel;
 	uint64_t movementNeeded;
 	const ChainActor * actor;
 	const CGHeroInstance * hero;
@@ -1005,8 +1022,8 @@ struct TowmPortalFinder
 		townPortal = spellID.toSpell();
 
 		// TODO: Copy/Paste from TownPortalMechanics
-		townPortalSkillLevel = SecSkillLevel::SecSkillLevel(hero->getSpellSchoolLevel(townPortal));
-		movementNeeded = GameConstants::BASE_MOVEMENT_COST * (townPortalSkillLevel >= SecSkillLevel::EXPERT ? 2 : 3);
+		townPortalSkillLevel = MasteryLevel::Type(hero->getSpellSchoolLevel(townPortal));
+		movementNeeded = GameConstants::BASE_MOVEMENT_COST * (townPortalSkillLevel >= MasteryLevel::EXPERT ? 2 : 3);
 	}
 
 	bool actorCanCastTownPortal()
@@ -1027,7 +1044,7 @@ struct TowmPortalFinder
 				continue;
 			}
 
-			if(townPortalSkillLevel < SecSkillLevel::ADVANCED)
+			if(townPortalSkillLevel < MasteryLevel::ADVANCED)
 			{
 				const CGTownInstance * nearestTown = *vstd::minElementByFun(targetTowns, [&](const CGTownInstance * t) -> int
 				{
@@ -1069,7 +1086,8 @@ struct TowmPortalFinder
 				EPathNodeAction::TELEPORT_NORMAL,
 				bestNode->turns,
 				bestNode->moveRemains - movementNeeded,
-				movementCost);
+				movementCost,
+				DO_NOT_SAVE_TO_COMMITED_TILES);
 
 			node->theNodeBefore = bestNode;
 			node->addSpecialAction(std::make_shared<AIPathfinding::TownPortalAction>(targetTown));
@@ -1343,6 +1361,7 @@ void AINodeStorage::fillChainInfo(const AIPathNode * node, AIPath & path, int pa
 			pathNode.coord = node->coord;
 			pathNode.parentIndex = parentIndex;
 			pathNode.actionIsBlocked = false;
+			pathNode.layer = node->layer;
 
 			if(pathNode.specialAction)
 			{

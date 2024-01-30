@@ -34,20 +34,19 @@ void CBankInstanceConstructor::initTypeData(const JsonNode & input)
 	coastVisitable = input["coastVisitable"].Bool();
 }
 
-BankConfig CBankInstanceConstructor::generateConfig(const JsonNode & level, CRandomGenerator & rng) const
+BankConfig CBankInstanceConstructor::generateConfig(IGameCallback * cb, const JsonNode & level, CRandomGenerator & rng) const
 {
 	BankConfig bc;
+	JsonRandom randomizer(cb);
+	JsonRandom::Variables emptyVariables;
 
 	bc.chance = static_cast<ui32>(level["chance"].Float());
-	bc.guards = JsonRandom::loadCreatures(level["guards"], rng);
-
-	std::vector<SpellID> spells;
-	IObjectInterface::cb->getAllowedSpells(spells);
+	bc.guards = randomizer.loadCreatures(level["guards"], rng, emptyVariables);
 
 	bc.resources = ResourceSet(level["reward"]["resources"]);
-	bc.creatures = JsonRandom::loadCreatures(level["reward"]["creatures"], rng);
-	bc.artifacts = JsonRandom::loadArtifacts(level["reward"]["artifacts"], rng);
-	bc.spells = JsonRandom::loadSpells(level["reward"]["spells"], rng, spells);
+	bc.creatures = randomizer.loadCreatures(level["reward"]["creatures"], rng, emptyVariables);
+	bc.artifacts = randomizer.loadArtifacts(level["reward"]["artifacts"], rng, emptyVariables);
+	bc.spells = randomizer.loadSpells(level["reward"]["spells"], rng, emptyVariables);
 
 	return bc;
 }
@@ -72,7 +71,7 @@ void CBankInstanceConstructor::randomizeObject(CBank * bank, CRandomGenerator & 
 		cumulativeChance += static_cast<int>(node["chance"].Float());
 		if(selectedChance < cumulativeChance)
 		{
-			bank->setConfig(generateConfig(node, rng));
+			bank->setConfig(generateConfig(bank->cb, node, rng));
 			break;
 		}
 	}
@@ -84,75 +83,16 @@ CBankInfo::CBankInfo(const JsonVector & Config) :
 	assert(!Config.empty());
 }
 
-static void addStackToArmy(IObjectInfo::CArmyStructure & army, const CCreature * crea, si32 amount)
+TPossibleGuards CBankInfo::getPossibleGuards(IGameCallback * cb) const
 {
-	army.totalStrength += crea->getFightValue() * amount;
-
-	bool walker = true;
-	if(crea->hasBonusOfType(BonusType::SHOOTER))
-	{
-		army.shootersStrength += crea->getFightValue() * amount;
-		walker = false;
-	}
-	if(crea->hasBonusOfType(BonusType::FLYING))
-	{
-		army.flyersStrength += crea->getFightValue() * amount;
-		walker = false;
-	}
-	if(walker)
-		army.walkersStrength += crea->getFightValue() * amount;
-}
-
-IObjectInfo::CArmyStructure CBankInfo::minGuards() const
-{
-	std::vector<IObjectInfo::CArmyStructure> armies;
-	for(auto configEntry : config)
-	{
-		auto stacks = JsonRandom::evaluateCreatures(configEntry["guards"]);
-		IObjectInfo::CArmyStructure army;
-		for(auto & stack : stacks)
-		{
-			assert(!stack.allowedCreatures.empty());
-			auto weakest = boost::range::min_element(stack.allowedCreatures, [](const CCreature * a, const CCreature * b)
-			{
-				return a->getFightValue() < b->getFightValue();
-			});
-			addStackToArmy(army, *weakest, stack.minAmount);
-		}
-		armies.push_back(army);
-	}
-	return *boost::range::min_element(armies);
-}
-
-IObjectInfo::CArmyStructure CBankInfo::maxGuards() const
-{
-	std::vector<IObjectInfo::CArmyStructure> armies;
-	for(auto configEntry : config)
-	{
-		auto stacks = JsonRandom::evaluateCreatures(configEntry["guards"]);
-		IObjectInfo::CArmyStructure army;
-		for(auto & stack : stacks)
-		{
-			assert(!stack.allowedCreatures.empty());
-			auto strongest = boost::range::max_element(stack.allowedCreatures, [](const CCreature * a, const CCreature * b)
-			{
-				return a->getFightValue() < b->getFightValue();
-			});
-			addStackToArmy(army, *strongest, stack.maxAmount);
-		}
-		armies.push_back(army);
-	}
-	return *boost::range::max_element(armies);
-}
-
-TPossibleGuards CBankInfo::getPossibleGuards() const
-{
+	JsonRandom::Variables emptyVariables;
+	JsonRandom randomizer(cb);
 	TPossibleGuards out;
 
 	for(const JsonNode & configEntry : config)
 	{
 		const JsonNode & guardsInfo = configEntry["guards"];
-		auto stacks = JsonRandom::evaluateCreatures(guardsInfo);
+		auto stacks = randomizer.evaluateCreatures(guardsInfo, emptyVariables);
 		IObjectInfo::CArmyStructure army;
 
 
@@ -185,14 +125,16 @@ std::vector<PossibleReward<TResources>> CBankInfo::getPossibleResourcesReward() 
 	return result;
 }
 
-std::vector<PossibleReward<CStackBasicDescriptor>> CBankInfo::getPossibleCreaturesReward() const
+std::vector<PossibleReward<CStackBasicDescriptor>> CBankInfo::getPossibleCreaturesReward(IGameCallback * cb) const
 {
+	JsonRandom::Variables emptyVariables;
+	JsonRandom randomizer(cb);
 	std::vector<PossibleReward<CStackBasicDescriptor>> aproximateReward;
 
 	for(const JsonNode & configEntry : config)
 	{
 		const JsonNode & guardsInfo = configEntry["reward"]["creatures"];
-		auto stacks = JsonRandom::evaluateCreatures(guardsInfo);
+		auto stacks = randomizer.evaluateCreatures(guardsInfo, emptyVariables);
 
 		for(auto stack : stacks)
 		{

@@ -68,7 +68,7 @@ void CSDL_Ext::updateRect(SDL_Surface *surface, const Rect & rect )
 		logGlobal->error("%sSDL_UpdateTexture %s", __FUNCTION__, SDL_GetError());
 
 	SDL_RenderClear(mainRenderer);
-	if(0 != SDL_RenderCopy(mainRenderer, screenTexture, NULL, NULL))
+	if(0 != SDL_RenderCopy(mainRenderer, screenTexture, nullptr, nullptr))
 		logGlobal->error("%sSDL_RenderCopy %s", __FUNCTION__, SDL_GetError());
 	SDL_RenderPresent(mainRenderer);
 
@@ -246,7 +246,10 @@ int CSDL_Ext::blit8bppAlphaTo24bppT(const SDL_Surface * src, const Rect & srcRec
 	if (src->format->BytesPerPixel==1 && (bpp==3 || bpp==4 || bpp==2)) //everything's ok
 	{
 		SDL_Rect fulldst;
-		int srcx, srcy, w, h;
+		int srcx;
+		int srcy;
+		int w;
+		int h;
 
 		/* If the destination rectangle is nullptr, use the entire dest surface */
 		if ( dstRect == nullptr )
@@ -258,7 +261,8 @@ int CSDL_Ext::blit8bppAlphaTo24bppT(const SDL_Surface * src, const Rect & srcRec
 		/* clip the source rectangle to the source surface */
 		if(srcRect)
 		{
-			int maxw, maxh;
+			int maxw;
+			int maxh;
 
 			srcx = srcRect->x;
 			w = srcRect->w;
@@ -295,7 +299,8 @@ int CSDL_Ext::blit8bppAlphaTo24bppT(const SDL_Surface * src, const Rect & srcRec
 		/* clip the destination rectangle against the clip rectangle */
 		{
 			SDL_Rect *clip = &dst->clip_rect;
-			int dx, dy;
+			int dx;
+			int dy;
 
 			dx = clip->x - dstRect->x;
 			if(dx > 0)
@@ -659,16 +664,16 @@ void CSDL_Ext::convertToGrayscale( SDL_Surface * surf, const Rect & rect )
 template<int bpp>
 void scaleSurfaceFastInternal(SDL_Surface *surf, SDL_Surface *ret)
 {
-	const float factorX = float(surf->w) / float(ret->w),
-				factorY = float(surf->h) / float(ret->h);
+	const float factorX = static_cast<float>(surf->w) / static_cast<float>(ret->w);
+	const float factorY = static_cast<float>(surf->h) / static_cast<float>(ret->h);
 
 	for(int y = 0; y < ret->h; y++)
 	{
 		for(int x = 0; x < ret->w; x++)
 		{
 			//coordinates we want to calculate
-			int origX = static_cast<int>(floor(factorX * x)),
-				origY = static_cast<int>(floor(factorY * y));
+			auto origX = static_cast<int>(floor(factorX * x));
+			auto origY = static_cast<int>(floor(factorY * y));
 
 			// Get pointers to source pixels
 			uint8_t *srcPtr = (uint8_t*)surf->pixels + origY * surf->pitch + origX * bpp;
@@ -813,8 +818,8 @@ void CSDL_Ext::fillRectBlended( SDL_Surface *dst, const Rect & dstrect, const SD
 	uint32_t sdlColor = SDL_MapRGBA(dst->format, color.r, color.g, color.b, color.a);
 
 	SDL_Surface * tmp = SDL_CreateRGBSurface(0, newRect.w, newRect.h, dst->format->BitsPerPixel, dst->format->Rmask, dst->format->Gmask, dst->format->Bmask, dst->format->Amask);
-	SDL_FillRect(tmp, NULL, sdlColor);
-	SDL_BlitSurface(tmp, NULL, dst, &newRect);
+	SDL_FillRect(tmp, nullptr, sdlColor);
+	SDL_BlitSurface(tmp, nullptr, dst, &newRect);
 	SDL_FreeSurface(tmp);
 }
 

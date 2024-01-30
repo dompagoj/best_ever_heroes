@@ -9,8 +9,9 @@
  */
 #pragma once
 #include "BattleHex.h"
-#include "NetPacksBase.h"
 #include "../filesystem/ResourcePath.h"
+#include "../networkPacks/BattleChanges.h"
+#include "../constants/EntityIdentifiers.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -62,7 +63,7 @@ struct DLL_LINKAGE CObstacleInstance
 	
 	virtual void serializeJson(JsonSerializeFormat & handler);
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & ID;
 		h & pos;
@@ -117,7 +118,7 @@ struct DLL_LINKAGE SpellCreatedObstacle : CObstacleInstance
 
 	void serializeJson(JsonSerializeFormat & handler) override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CObstacleInstance&>(*this);
 		h & turnsRemaining;

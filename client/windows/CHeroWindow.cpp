@@ -39,7 +39,7 @@
 #include "../lib/CHeroHandler.h"
 #include "../lib/CSkillHandler.h"
 #include "../lib/mapObjects/CGHeroInstance.h"
-#include "../lib/NetPacksBase.h"
+#include "../../lib/networkPacks/ArtifactLocation.h"
 
 void CHeroSwitcher::clickPressed(const Point & cursorPosition)
 {
@@ -64,7 +64,7 @@ CHeroSwitcher::CHeroSwitcher(CHeroWindow * owner_, Point pos_, const CGHeroInsta
 	OBJECT_CONSTRUCTION_CAPTURING(255-DISPOSE);
 	pos += pos_;
 
-	image = std::make_shared<CAnimImage>(AnimationPath::builtin("PortraitsSmall"), hero->portrait);
+	image = std::make_shared<CAnimImage>(AnimationPath::builtin("PortraitsSmall"), hero->getIconIndex());
 	pos.w = image->pos.w;
 	pos.h = image->pos.h;
 }
@@ -119,9 +119,9 @@ CHeroWindow::CHeroWindow(const CGHeroInstance * hero)
 
 	for(int v = 0; v < GameConstants::PRIMARY_SKILLS; ++v)
 	{
-		auto area = std::make_shared<LRClickableAreaWTextComp>(Rect(30 + 70 * v, 109, 42, 64), CComponent::primskill);
+		auto area = std::make_shared<LRClickableAreaWTextComp>(Rect(30 + 70 * v, 109, 42, 64), ComponentType::PRIM_SKILL);
 		area->text = CGI->generaltexth->arraytxt[2+v];
-		area->type = v;
+		area->component.subType = PrimarySkill(v);
 		area->hoverText = boost::str(boost::format(CGI->generaltexth->heroscrn[1]) % CGI->generaltexth->primarySkillNames[v]);
 		primSkillAreas.push_back(area);
 
@@ -154,7 +154,7 @@ CHeroWindow::CHeroWindow(const CGHeroInstance * hero)
 	for(int i = 0; i < std::min<size_t>(hero->secSkills.size(), 8u); ++i)
 	{
 		Rect r = Rect(i%2 == 0  ?  18  :  162,  276 + 48 * (i/2),  136,  42);
-		secSkillAreas.push_back(std::make_shared<LRClickableAreaWTextComp>(r, CComponent::secskill));
+		secSkillAreas.push_back(std::make_shared<LRClickableAreaWTextComp>(r, ComponentType::SEC_SKILL));
 		secSkillImages.push_back(std::make_shared<CAnimImage>(secSkills, 0, 0, r.x, r.y));
 
 		int x = (i % 2) ? 212 : 68;
@@ -202,7 +202,7 @@ void CHeroWindow::update(const CGHeroInstance * hero, bool redrawNeeded)
 	dismissButton->addHoverText(CButton::NORMAL, boost::str(boost::format(CGI->generaltexth->heroscrn[16]) % curHero->getNameTranslated() % curHero->type->heroClass->getNameTranslated()));
 	portraitArea->hoverText = boost::str(boost::format(CGI->generaltexth->allTexts[15]) % curHero->getNameTranslated() % curHero->type->heroClass->getNameTranslated());
 	portraitArea->text = curHero->getBiographyTranslated();
-	portraitImage->setFrame(curHero->portrait);
+	portraitImage->setFrame(curHero->getIconIndex());
 
 	{
 		OBJECT_CONSTRUCTION_CUSTOM_CAPTURING(255-DISPOSE);
@@ -232,20 +232,21 @@ void CHeroWindow::update(const CGHeroInstance * hero, bool redrawNeeded)
 	//primary skills support
 	for(size_t g=0; g<primSkillAreas.size(); ++g)
 	{
-		primSkillAreas[g]->bonusValue = curHero->getPrimSkillLevel(static_cast<PrimarySkill>(g));
-		primSkillValues[g]->setText(std::to_string(primSkillAreas[g]->bonusValue));
+		int value = curHero->getPrimSkillLevel(static_cast<PrimarySkill>(g));
+		primSkillAreas[g]->component.value = value;
+		primSkillValues[g]->setText(std::to_string(value));
 	}
 
 	//secondary skills support
 	for(size_t g=0; g< secSkillAreas.size(); ++g)
 	{
-		int skill = curHero->secSkills[g].first;
-		int	level = curHero->getSecSkillLevel(SecondarySkill(curHero->secSkills[g].first));
+		SecondarySkill skill = curHero->secSkills[g].first;
+		int	level = curHero->getSecSkillLevel(skill);
 		std::string skillName = CGI->skillh->getByIndex(skill)->getNameTranslated();
 		std::string skillValue = CGI->generaltexth->levels[level-1];
 
-		secSkillAreas[g]->type = skill;
-		secSkillAreas[g]->bonusValue = level;
+		secSkillAreas[g]->component.subType = skill;
+		secSkillAreas[g]->component.value = level;
 		secSkillAreas[g]->text = CGI->skillh->getByIndex(skill)->getDescriptionTranslated(level);
 		secSkillAreas[g]->hoverText = boost::str(boost::format(heroscrn[21]) % skillValue % skillName);
 		secSkillImages[g]->setFrame(skill*3 + level + 2);
@@ -305,7 +306,7 @@ void CHeroWindow::update(const CGHeroInstance * hero, bool redrawNeeded)
 	formations->resetCallback();
 	//setting formations
 	formations->setSelected(curHero->formation == EArmyFormation::TIGHT ? 1 : 0);
-	formations->addCallback([=](int value){ LOCPLINT->cb->setFormation(curHero, value);});
+	formations->addCallback([=](int value){ LOCPLINT->cb->setFormation(curHero, static_cast<EArmyFormation>(value));});
 
 	morale->set(curHero);
 	luck->set(curHero);
@@ -334,20 +335,11 @@ void CHeroWindow::commanderWindow()
 	if(pickedArtInst)
 	{
 		const auto freeSlot = ArtifactUtils::getArtAnyPosition(curHero->commander, pickedArtInst->getTypeId());
-		if(freeSlot < ArtifactPosition::COMMANDER_AFTER_LAST) //we don't want to put it in commander's backpack!
+		if(vstd::contains(ArtifactUtils::commanderSlots(), freeSlot)) // We don't want to put it in commander's backpack!
 		{
-			ArtifactLocation src(hero, ArtifactPosition::TRANSITION_POS);
-			ArtifactLocation dst(curHero->commander.get(), freeSlot);
-
-			if(pickedArtInst->canBePutAt(dst, true))
-			{	//equip clicked stack
-				if(dst.getArt())
-				{
-					LOCPLINT->cb->swapArtifacts(dst, ArtifactLocation(hero,
-						ArtifactUtils::getArtBackpackPosition(hero, pickedArtInst->getTypeId())));
-				}
-				LOCPLINT->cb->swapArtifacts(src, dst);
-			}
+			ArtifactLocation dst(curHero->id, freeSlot);
+			dst.creature = SlotID::COMMANDER_SLOT_PLACEHOLDER;
+			LOCPLINT->cb->swapArtifacts(ArtifactLocation(hero->id, ArtifactPosition::TRANSITION_POS), dst);
 		}
 	}
 	else
@@ -360,4 +352,9 @@ void CHeroWindow::updateGarrisons()
 {
 	garr->recreateSlots();
 	morale->set(curHero);
+}
+
+bool CHeroWindow::holdsGarrison(const CArmedInstance * army)
+{
+	return army == curHero;
 }

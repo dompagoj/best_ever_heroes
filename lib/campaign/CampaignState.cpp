@@ -11,6 +11,7 @@
 #include "CampaignState.h"
 
 #include "../JsonNode.h"
+#include "../Point.h"
 #include "../filesystem/ResourcePath.h"
 #include "../VCMI_Lib.h"
 #include "../CGeneralTextHandler.h"
@@ -73,13 +74,13 @@ ImagePath CampaignRegions::getBackgroundName() const
 
 Point CampaignRegions::getPosition(CampaignScenarioID which) const
 {
-	auto const & region = regions[static_cast<int>(which)];
+	auto const & region = regions[which.getNum()];
 	return Point(region.xpos, region.ypos);
 }
 
 ImagePath CampaignRegions::getNameFor(CampaignScenarioID which, int colorIndex, std::string type) const
 {
-	auto const & region = regions[static_cast<int>(which)];
+	auto const & region = regions[which.getNum()];
 
 	static const std::string colors[2][8] =
 	{
@@ -134,14 +135,14 @@ bool CampaignHeader::formatVCMI() const
 	return version == CampaignVersion::VCMI;
 }
 
-std::string CampaignHeader::getDescription() const
+std::string CampaignHeader::getDescriptionTranslated() const
 {
-	return description;
+	return description.toString();
 }
 
-std::string CampaignHeader::getName() const
+std::string CampaignHeader::getNameTranslated() const
 {
-	return name;
+	return name.toString();
 }
 
 std::string CampaignHeader::getFilename() const
@@ -167,6 +168,11 @@ AudioPath CampaignHeader::getMusic() const
 const CampaignRegions & CampaignHeader::getRegions() const
 {
 	return campaignRegions;
+}
+
+TextContainerRegistrable & CampaignHeader::getTexts()
+{
+	return textContainer;
 }
 
 bool CampaignState::isConquered(CampaignScenarioID whichScenario) const
@@ -219,7 +225,7 @@ std::set<HeroTypeID> CampaignState::getReservedHeroes() const
 
 const CGHeroInstance * CampaignState::strongestHero(CampaignScenarioID scenarioId, const PlayerColor & owner) const
 {
-	std::function<bool(const JsonNode & node)> isOwned = [owner](const JsonNode & node)
+	std::function<bool(const JsonNode & node)> isOwned = [&](const JsonNode & node)
 	{
 		auto * h = CampaignState::crossoverDeserialize(node, nullptr);
 		bool result = h->tempOwner == owner;
@@ -267,24 +273,23 @@ void CampaignState::setCurrentMapAsConquered(std::vector<CGHeroInstance *> heroe
 		return a->getHeroStrength() > b->getHeroStrength();
 	});
 
-	logGlobal->info("Scenario %d of campaign %s (%s) has been completed", static_cast<int>(*currentMap), getFilename(), getName());
+	logGlobal->info("Scenario %d of campaign %s (%s) has been completed", currentMap->getNum(), getFilename(), getNameTranslated());
 
 	mapsConquered.push_back(*currentMap);
 	auto reservedHeroes = getReservedHeroes();
 
 	for (auto * hero : heroes)
 	{
-		HeroTypeID heroType(hero->subID);
 		JsonNode node = CampaignState::crossoverSerialize(hero);
 
-		if (reservedHeroes.count(heroType))
+		if (reservedHeroes.count(hero->getHeroType()))
 		{
-			logGlobal->info("Hero crossover: %d (%s) exported to global pool", hero->subID, hero->getNameTranslated());
-			globalHeroPool[heroType] = node;
+			logGlobal->info("Hero crossover: %d (%s) exported to global pool", hero->getHeroType(), hero->getNameTranslated());
+			globalHeroPool[hero->getHeroType()] = node;
 		}
 		else
 		{
-			logGlobal->info("Hero crossover: %d (%s) exported to scenario pool", hero->subID, hero->getNameTranslated());
+			logGlobal->info("Hero crossover: %d (%s) exported to scenario pool", hero->getHeroType(), hero->getNameTranslated());
 			scenarioHeroPool[*currentMap].push_back(node);
 		}
 	}
@@ -312,7 +317,7 @@ std::optional<ui8> CampaignState::getBonusID(CampaignScenarioID which) const
 	return chosenCampaignBonuses.at(which);
 }
 
-std::unique_ptr<CMap> CampaignState::getMap(CampaignScenarioID scenarioId) const
+std::unique_ptr<CMap> CampaignState::getMap(CampaignScenarioID scenarioId, IGameCallback * cb) const
 {
 	// FIXME: there is certainly better way to handle maps inside campaigns
 	if(scenarioId == CampaignScenarioID::NONE)
@@ -321,9 +326,9 @@ std::unique_ptr<CMap> CampaignState::getMap(CampaignScenarioID scenarioId) const
 	CMapService mapService;
 	std::string scenarioName = getFilename().substr(0, getFilename().find('.'));
 	boost::to_lower(scenarioName);
-	scenarioName += ':' + std::to_string(static_cast<int>(scenarioId));
+	scenarioName += ':' + std::to_string(scenarioId.getNum());
 	const auto & mapContent = mapPieces.find(scenarioId)->second;
-	return mapService.loadMap(mapContent.data(), mapContent.size(), scenarioName, getModName(), getEncoding());
+	return mapService.loadMap(mapContent.data(), mapContent.size(), scenarioName, getModName(), getEncoding(), cb);
 }
 
 std::unique_ptr<CMapHeader> CampaignState::getMapHeader(CampaignScenarioID scenarioId) const
@@ -334,7 +339,7 @@ std::unique_ptr<CMapHeader> CampaignState::getMapHeader(CampaignScenarioID scena
 	CMapService mapService;
 	std::string scenarioName = getFilename().substr(0, getFilename().find('.'));
 	boost::to_lower(scenarioName);
-	scenarioName += ':' + std::to_string(static_cast<int>(scenarioId));
+	scenarioName += ':' + std::to_string(scenarioId.getNum());
 	const auto & mapContent = mapPieces.find(scenarioId)->second;
 	return mapService.loadMapHeader(mapContent.data(), mapContent.size(), scenarioName, getModName(), getEncoding());
 }
@@ -351,7 +356,7 @@ std::shared_ptr<CMapInfo> CampaignState::getMapInfo(CampaignScenarioID scenarioI
 	return mapInfo;
 }
 
-JsonNode CampaignState::crossoverSerialize(CGHeroInstance * hero)
+JsonNode CampaignState::crossoverSerialize(CGHeroInstance * hero) const
 {
 	JsonNode node;
 	JsonSerializer handler(nullptr, node);
@@ -359,10 +364,10 @@ JsonNode CampaignState::crossoverSerialize(CGHeroInstance * hero)
 	return node;
 }
 
-CGHeroInstance * CampaignState::crossoverDeserialize(const JsonNode & node, CMap * map)
+CGHeroInstance * CampaignState::crossoverDeserialize(const JsonNode & node, CMap * map) const
 {
 	JsonDeserializer handler(nullptr, const_cast<JsonNode&>(node));
-	auto * hero = new CGHeroInstance();
+	auto * hero = new CGHeroInstance(map->cb);
 	hero->ID = Obj::HERO;
 	hero->serializeJsonOptions(handler);
 	if (map)

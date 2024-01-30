@@ -48,6 +48,7 @@
 #include "widgets/CComponent.h"
 #include "widgets/CGarrisonInt.h"
 
+#include "windows/CAltarWindow.h"
 #include "windows/CCastleInterface.h"
 #include "windows/CCreatureWindow.h"
 #include "windows/CHeroWindow.h"
@@ -56,6 +57,7 @@
 #include "windows/CQuestLog.h"
 #include "windows/CSpellWindow.h"
 #include "windows/CTradeWindow.h"
+#include "windows/CTutorialWindow.h"
 #include "windows/GUIClasses.h"
 #include "windows/InfoWindows.h"
 
@@ -73,8 +75,6 @@
 #include "../lib/CondSh.h"
 #include "../lib/GameConstants.h"
 #include "../lib/JsonNode.h"
-#include "../lib/NetPacks.h" //todo: remove
-#include "../lib/NetPacksBase.h"
 #include "../lib/RoadHandler.h"
 #include "../lib/StartInfo.h"
 #include "../lib/TerrainHandler.h"
@@ -82,7 +82,6 @@
 #include "../lib/UnlockGuard.h"
 #include "../lib/VCMIDirs.h"
 
-#include "../lib/bonuses/CBonusSystemNode.h"
 #include "../lib/bonuses/Limiters.h"
 #include "../lib/bonuses/Propagators.h"
 #include "../lib/bonuses/Updaters.h"
@@ -95,6 +94,10 @@
 
 #include "../lib/mapping/CMapHeader.h"
 
+#include "../lib/networkPacks/PacksForClient.h"
+#include "../lib/networkPacks/PacksForClientBattle.h"
+#include "../lib/networkPacks/PacksForServer.h"
+
 #include "../lib/pathfinder/CGPathNode.h"
 
 #include "../lib/serializer/BinaryDeserializer.h"
@@ -104,16 +107,10 @@
 #include "../lib/spells/CSpellHandler.h"
 
 // The macro below is used to mark functions that are called by client when game state changes.
-// They all assume that CPlayerInterface::pim mutex is locked.
+// They all assume that interface mutex is locked.
 #define EVENT_HANDLER_CALLED_BY_CLIENT
 
-#define BATTLE_EVENT_POSSIBLE_RETURN	\
-	if (LOCPLINT != this)				\
-		return;							\
-	if (isAutoFightOn && !battleInt)	\
-		return;
-
-boost::recursive_mutex * CPlayerInterface::pim = new boost::recursive_mutex;
+#define BATTLE_EVENT_POSSIBLE_RETURN	if (LOCPLINT != this) return; if (isAutoFightOn && !battleInt) return
 
 CPlayerInterface * LOCPLINT;
 
@@ -148,6 +145,7 @@ CPlayerInterface::CPlayerInterface(PlayerColor Player):
 	firstCall = 1; //if loading will be overwritten in serialize
 	autosaveCount = 0;
 	isAutoFightOn = false;
+	isAutoFightEndBattle = false;
 	ignoreEvents = false;
 	numOfMovedArts = 0;
 }
@@ -237,7 +235,7 @@ void CPlayerInterface::performAutosave()
 			prefix = settings["general"]["savePrefix"].String();
 			if(prefix.empty())
 			{
-				std::string name = cb->getMapHeader()->name;
+				std::string name = cb->getMapHeader()->name.toString();
 				int txtlen = TextOperations::getUnicodeCharactersCount(name);
 
 				TextOperations::trimRightUnicode(name, std::max(0, txtlen - 15));
@@ -267,8 +265,15 @@ void CPlayerInterface::performAutosave()
 	}
 }
 
+void CPlayerInterface::gamePause(bool pause)
+{
+	cb->gamePause(pause);
+}
+
 void CPlayerInterface::yourTurn(QueryID queryID)
 {
+	CTutorialWindow::openWindowFirstTime(TutorialMode::TOUCH_ADVENTUREMAP);
+
 	EVENT_HANDLER_CALLED_BY_CLIENT;
 	{
 		LOCPLINT = this;
@@ -288,7 +293,7 @@ void CPlayerInterface::yourTurn(QueryID queryID)
 			std::string msg = CGI->generaltexth->allTexts[13];
 			boost::replace_first(msg, "%s", cb->getStartInfo()->playerInfos.find(playerID)->second.name);
 			std::vector<std::shared_ptr<CComponent>> cmp;
-			cmp.push_back(std::make_shared<CComponent>(CComponent::flag, playerID.getNum(), 0));
+			cmp.push_back(std::make_shared<CComponent>(ComponentType::FLAG, playerID));
 			showInfoDialog(msg, cmp);
 		}
 		else
@@ -321,7 +326,7 @@ void CPlayerInterface::acceptTurn(QueryID queryID)
 		auto playerColor = *cb->getPlayerID();
 
 		std::vector<Component> components;
-		components.emplace_back(Component::EComponentType::FLAG, playerColor.getNum(), 0, 0);
+		components.emplace_back(ComponentType::FLAG, playerColor);
 		MetaString text;
 
 		const auto & optDaysWithoutCastle = cb->getPlayerState(playerColor)->daysWithoutCastle;
@@ -332,13 +337,13 @@ void CPlayerInterface::acceptTurn(QueryID queryID)
 			if (daysWithoutCastle < 6)
 			{
 				text.appendLocalString(EMetaText::ARRAY_TXT,128); //%s, you only have %d days left to capture a town or you will be banished from this land.
-				text.replaceLocalString(EMetaText::COLOR, playerColor.getNum());
+				text.replaceName(playerColor);
 				text.replaceNumber(7 - daysWithoutCastle);
 			}
 			else if (daysWithoutCastle == 6)
 			{
 				text.appendLocalString(EMetaText::ARRAY_TXT,129); //%s, this is your last day to capture a town or you will be banished from this land.
-				text.replaceLocalString(EMetaText::COLOR, playerColor.getNum());
+				text.replaceName(playerColor);
 			}
 
 			showInfoDialogAndWait(components, text);
@@ -416,7 +421,7 @@ void CPlayerInterface::heroPrimarySkillChanged(const CGHeroInstance * hero, Prim
 	if (which == PrimarySkill::EXPERIENCE)
 	{
 		for (auto ctw : GH.windows().findWindows<CAltarWindow>())
-			ctw->setExpToLevel();
+			ctw->updateExpToLevel();
 	}
 	else
 		adventureInt->onHeroChanged(hero);
@@ -493,8 +498,9 @@ void CPlayerInterface::heroInGarrisonChange(const CGTownInstance *town)
 	adventureInt->onHeroChanged(nullptr);
 	adventureInt->onTownChanged(town);
 
-	for (auto gh : GH.windows().findWindows<IGarrisonHolder>())
-		gh->updateGarrisons();
+	for (auto cgh : GH.windows().findWindows<IGarrisonHolder>())
+		if (cgh->holdsGarrison(town))
+			cgh->updateGarrisons();
 
 	for (auto ki : GH.windows().findWindows<CKingdomInterface>())
 		ki->townChanged(town);
@@ -515,50 +521,42 @@ void CPlayerInterface::heroVisitsTown(const CGHeroInstance* hero, const CGTownIn
 
 void CPlayerInterface::garrisonsChanged(ObjectInstanceID id1, ObjectInstanceID id2)
 {
-	std::vector<const CGObjectInstance *> instances;
+	std::vector<const CArmedInstance *> instances;
 
-	if(auto obj = cb->getObj(id1))
+	if(auto obj = dynamic_cast<const CArmedInstance *>(cb->getObjInstance(id1)))
 		instances.push_back(obj);
 
 
 	if(id2 != ObjectInstanceID() && id2 != id1)
 	{
-		if(auto obj = cb->getObj(id2))
+		if(auto obj = dynamic_cast<const CArmedInstance *>(cb->getObjInstance(id2)))
 			instances.push_back(obj);
 	}
 
 	garrisonsChanged(instances);
 }
 
-void CPlayerInterface::garrisonsChanged(std::vector<const CGObjectInstance *> objs)
+void CPlayerInterface::garrisonsChanged(std::vector<const CArmedInstance *> objs)
 {
-	boost::unique_lock<boost::recursive_mutex> un(*pim);
 	for (auto object : objs)
 	{
 		auto * hero = dynamic_cast<const CGHeroInstance*>(object);
 		auto * town = dynamic_cast<const CGTownInstance*>(object);
 
+		if (town)
+			adventureInt->onTownChanged(town);
+
 		if (hero)
 		{
 			adventureInt->onHeroChanged(hero);
-
-			if(hero->inTownGarrison)
-			{
+			if(hero->inTownGarrison && hero->visitedTown != town)
 				adventureInt->onTownChanged(hero->visitedTown);
-			}
 		}
-		if (town)
-			adventureInt->onTownChanged(town);
 	}
 
 	for (auto cgh : GH.windows().findWindows<IGarrisonHolder>())
-		cgh->updateGarrisons();
-
-	for (auto cmw : GH.windows().findWindows<CTradeWindow>())
-	{
-		if (vstd::contains(objs, cmw->hero))
-			cmw->garrisonChanged();
-	}
+		if (cgh->holdsGarrisons(objs))
+			cgh->updateGarrisons();
 
 	GH.windows().totalRedraw();
 }
@@ -589,6 +587,9 @@ void CPlayerInterface::buildChanged(const CGTownInstance *town, BuildingID build
 		// Perform totalRedraw in order to force redraw of updated town list icon from adventure map
 		GH.windows().totalRedraw();
 	}
+
+	for (auto cgh : GH.windows().findWindows<ITownHolder>())
+		cgh->buildChanged();
 }
 
 void CPlayerInterface::battleStartBefore(const BattleID & battleID, const CCreatureSet *army1, const CCreatureSet *army2, int3 tile, const CGHeroInstance *hero1, const CGHeroInstance *hero2)
@@ -752,7 +753,7 @@ void CPlayerInterface::activeStack(const BattleID & battleID, const CStack * sta
 		{
 			//FIXME: we want client rendering to proceed while AI is making actions
 			// so unlock mutex while AI is busy since this might take quite a while, especially if hero has many spells
-			auto unlockPim = vstd::makeUnlockGuard(*pim);
+			auto unlockInterface = vstd::makeUnlockGuard(GH.interfaceMutex);
 			autofightingAI->activeStack(battleID, stack);
 			return;
 		}
@@ -768,11 +769,7 @@ void CPlayerInterface::activeStack(const BattleID & battleID, const CStack * sta
 		cb->battleMakeUnitAction(battleID, BattleAction::makeDefend(stack));
 	}
 
-	{
-		boost::unique_lock<boost::recursive_mutex> un(*pim);
-		battleInt->stackActivated(stack);
-		//Regeneration & mana drain go there
-	}
+	battleInt->stackActivated(stack);
 }
 
 void CPlayerInterface::battleEnd(const BattleID & battleID, const BattleResult *br, QueryID queryID)
@@ -786,17 +783,20 @@ void CPlayerInterface::battleEnd(const BattleID & battleID, const BattleResult *
 
 		if(!battleInt)
 		{
-			bool allowManualReplay = queryID != QueryID::NONE;
+			bool allowManualReplay = queryID != QueryID::NONE && !isAutoFightEndBattle;
 
 			auto wnd = std::make_shared<BattleResultWindow>(*br, *this, allowManualReplay);
 
-			if (allowManualReplay)
+			if (allowManualReplay || isAutoFightEndBattle)
 			{
 				wnd->resultCallback = [=](ui32 selection)
 				{
 					cb->selectionMade(selection, queryID);
 				};
 			}
+			
+			isAutoFightEndBattle = false;
+
 			GH.windows().pushWindow(wnd);
 			// #1490 - during AI turn when quick combat is on, we need to display the message and wait for user to close it.
 			// Otherwise NewTurn causes freeze.
@@ -1015,8 +1015,6 @@ void CPlayerInterface::showInfoDialogAndWait(std::vector<Component> & components
 
 void CPlayerInterface::showYesNoDialog(const std::string &text, CFunctionList<void()> onYes, CFunctionList<void()> onNo, const std::vector<std::shared_ptr<CComponent>> & components)
 {
-	boost::unique_lock<boost::recursive_mutex> un(*pim);
-
 	movementController->requestMovementAbort();
 	LOCPLINT->showingDialog->setn(true);
 	CInfoWindow::showYesNoDialog(text, components, onYes, onNo, playerID);
@@ -1094,7 +1092,7 @@ void CPlayerInterface::showMapObjectSelectDialog(QueryID askID, const Component 
 	std::shared_ptr<CIntObject> localIcon = localIconC.image;
 	localIconC.removeChild(localIcon.get(), false);
 
-	std::shared_ptr<CObjectListWindow> wnd = std::make_shared<CObjectListWindow>(tempList, localIcon, localTitle, localDescription, selectCallback);
+	auto wnd = std::make_shared<CObjectListWindow>(tempList, localIcon, localTitle, localDescription, selectCallback);
 	wnd->onExit = cancelCallback;
 	GH.windows().pushWindow(wnd);
 }
@@ -1114,7 +1112,6 @@ void CPlayerInterface::tileHidden(const std::unordered_set<int3> &pos)
 
 void CPlayerInterface::openHeroWindow(const CGHeroInstance *hero)
 {
-	boost::unique_lock<boost::recursive_mutex> un(*pim);
 	GH.windows().createAndPushWindow<CHeroWindow>(hero);
 }
 
@@ -1157,16 +1154,16 @@ void CPlayerInterface::heroBonusChanged( const CGHeroInstance *hero, const Bonus
 	}
 }
 
-void CPlayerInterface::saveGame( BinarySerializer & h, const int version )
+void CPlayerInterface::saveGame( BinarySerializer & h )
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	localState->serialize(h, version);
+	localState->serialize(h);
 }
 
-void CPlayerInterface::loadGame( BinaryDeserializer & h, const int version )
+void CPlayerInterface::loadGame( BinaryDeserializer & h )
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	localState->serialize(h, version);
+	localState->serialize(h);
 	firstCall = -1;
 }
 
@@ -1228,7 +1225,7 @@ void CPlayerInterface::showArtifactAssemblyDialog(const Artifact * artifact, con
 		text += boost::str(boost::format(CGI->generaltexth->allTexts[732]) % assembledArtifact->getNameTranslated());
 
 		// Picture of assembled artifact at bottom.
-		auto sc = std::make_shared<CComponent>(CComponent::artifact, assembledArtifact->getIndex(), 0);
+		auto sc = std::make_shared<CComponent>(ComponentType::ARTIFACT, assembledArtifact->getId());
 		scs.push_back(sc);
 	}
 	else
@@ -1242,10 +1239,10 @@ void CPlayerInterface::showArtifactAssemblyDialog(const Artifact * artifact, con
 
 void CPlayerInterface::requestRealized( PackageApplied *pa )
 {
-	if(pa->packType == typeList.getTypeID<MoveHero>())
+	if(pa->packType == CTypeList::getInstance().getTypeID<MoveHero>(nullptr))
 		movementController->onMoveHeroApplied();
 
-	if(pa->packType == typeList.getTypeID<QueryReply>())
+	if(pa->packType == CTypeList::getInstance().getTypeID<QueryReply>(nullptr))
 		movementController->onQueryReplyApplied();
 }
 
@@ -1328,18 +1325,22 @@ void CPlayerInterface::initializeHeroTownList()
 		adventureInt->onHeroChanged(nullptr);
 }
 
-void CPlayerInterface::showRecruitmentDialog(const CGDwelling *dwelling, const CArmedInstance *dst, int level)
+void CPlayerInterface::showRecruitmentDialog(const CGDwelling *dwelling, const CArmedInstance *dst, int level, QueryID queryID)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
 	waitWhileDialog();
 	auto recruitCb = [=](CreatureID id, int count)
 	{
-		LOCPLINT->cb->recruitCreatures(dwelling, dst, id, count, -1);
+		cb->recruitCreatures(dwelling, dst, id, count, -1);
 	};
-	GH.windows().createAndPushWindow<CRecruitmentWindow>(dwelling, level, dst, recruitCb);
+	auto closeCb = [=]()
+	{
+		cb->selectionMade(0, queryID);
+	};
+	GH.windows().createAndPushWindow<CRecruitmentWindow>(dwelling, level, dst, recruitCb, closeCb);
 }
 
-void CPlayerInterface::waitWhileDialog(bool unlockPim)
+void CPlayerInterface::waitWhileDialog()
 {
 	if (GH.amIGuiThread())
 	{
@@ -1347,7 +1348,7 @@ void CPlayerInterface::waitWhileDialog(bool unlockPim)
 		return;
 	}
 
-	auto unlock = vstd::makeUnlockGuardIf(*pim, unlockPim);
+	auto unlockInterface = vstd::makeUnlockGuard(GH.interfaceMutex);
 	boost::unique_lock<boost::mutex> un(showingDialog->mx);
 	while(showingDialog->data)
 		showingDialog->cond.wait(un);
@@ -1385,8 +1386,8 @@ void CPlayerInterface::centerView (int3 pos, int focusTime)
 	{
 		GH.windows().totalRedraw();
 		{
-			auto unlockPim = vstd::makeUnlockGuard(*pim);
 			IgnoreEvents ignore(*this);
+			auto unlockInterface = vstd::makeUnlockGuard(GH.interfaceMutex);
 			boost::this_thread::sleep_for(boost::chrono::milliseconds(focusTime));
 		}
 	}
@@ -1437,7 +1438,7 @@ void CPlayerInterface::playerBlocked(int reason, bool start)
 			std::string msg = CGI->generaltexth->translate("vcmi.adventureMap.playerAttacked");
 			boost::replace_first(msg, "%s", cb->getStartInfo()->playerInfos.find(playerID)->second.name);
 			std::vector<std::shared_ptr<CComponent>> cmp;
-			cmp.push_back(std::make_shared<CComponent>(CComponent::flag, playerID.getNum(), 0));
+			cmp.push_back(std::make_shared<CComponent>(ComponentType::FLAG, playerID));
 			makingTurn = true; //workaround for stiff showInfoDialog implementation
 			showInfoDialog(msg, cmp);
 			makingTurn = false;
@@ -1631,24 +1632,30 @@ void CPlayerInterface::battleNewRoundFirst(const BattleID & battleID)
 	battleInt->newRoundFirst();
 }
 
-void CPlayerInterface::showMarketWindow(const IMarket *market, const CGHeroInstance *visitor)
+void CPlayerInterface::showMarketWindow(const IMarket *market, const CGHeroInstance *visitor, QueryID queryID)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
+	auto onWindowClosed = [this, queryID](){
+		cb->selectionMade(0, queryID);
+	};
 
 	if(market->allowsTrade(EMarketMode::ARTIFACT_EXP) && visitor->getAlignment() != EAlignment::EVIL)
-		GH.windows().createAndPushWindow<CAltarWindow>(market, visitor, EMarketMode::ARTIFACT_EXP);
+		GH.windows().createAndPushWindow<CAltarWindow>(market, visitor, onWindowClosed, EMarketMode::ARTIFACT_EXP);
 	else if(market->allowsTrade(EMarketMode::CREATURE_EXP) && visitor->getAlignment() != EAlignment::GOOD)
-		GH.windows().createAndPushWindow<CAltarWindow>(market, visitor, EMarketMode::CREATURE_EXP);
+		GH.windows().createAndPushWindow<CAltarWindow>(market, visitor, onWindowClosed, EMarketMode::CREATURE_EXP);
 	else if(market->allowsTrade(EMarketMode::CREATURE_UNDEAD))
-		GH.windows().createAndPushWindow<CTransformerWindow>(market, visitor);
+		GH.windows().createAndPushWindow<CTransformerWindow>(market, visitor, onWindowClosed);
 	else if(!market->availableModes().empty())
-		GH.windows().createAndPushWindow<CMarketplaceWindow>(market, visitor, market->availableModes().front());
+		GH.windows().createAndPushWindow<CMarketplaceWindow>(market, visitor, onWindowClosed, market->availableModes().front());
 }
 
-void CPlayerInterface::showUniversityWindow(const IMarket *market, const CGHeroInstance *visitor)
+void CPlayerInterface::showUniversityWindow(const IMarket *market, const CGHeroInstance *visitor, QueryID queryID)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	GH.windows().createAndPushWindow<CUniversityWindow>(visitor, market);
+	auto onWindowClosed = [this, queryID](){
+		cb->selectionMade(0, queryID);
+	};
+	GH.windows().createAndPushWindow<CUniversityWindow>(visitor, market, onWindowClosed);
 }
 
 void CPlayerInterface::showHillFortWindow(const CGObjectInstance *object, const CGHeroInstance *visitor)
@@ -1664,10 +1671,14 @@ void CPlayerInterface::availableArtifactsChanged(const CGBlackMarket * bm)
 		cmw->artifactsChanged(false);
 }
 
-void CPlayerInterface::showTavernWindow(const CGObjectInstance *townOrTavern)
+void CPlayerInterface::showTavernWindow(const CGObjectInstance * object, const CGHeroInstance * visitor, QueryID queryID)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	GH.windows().createAndPushWindow<CTavernWindow>(townOrTavern);
+	auto onWindowClosed = [this, queryID](){
+		if (queryID != QueryID::NONE)
+			cb->selectionMade(0, queryID);
+	};
+	GH.windows().createAndPushWindow<CTavernWindow>(object, onWindowClosed);
 }
 
 void CPlayerInterface::showThievesGuildWindow (const CGObjectInstance * obj)
@@ -1716,7 +1727,7 @@ void CPlayerInterface::requestReturningToMainMenu(bool won)
 			if(!ps->checkVanquished())
 				param.allDefeated = false;
 	}
-	param.scenarioName = cb->getMapHeader()->name;
+	param.scenarioName = cb->getMapHeader()->name.toString();
 	param.playerName = cb->getStartInfo()->playerInfos.find(*cb->getPlayerID())->second.name;
 	HighScoreCalculation highScoreCalc;
 	highScoreCalc.parameters.push_back(param);
@@ -1740,8 +1751,7 @@ void CPlayerInterface::requestReturningToMainMenu(bool won)
 
 void CPlayerInterface::askToAssembleArtifact(const ArtifactLocation &al)
 {
-	auto hero = std::visit(HeroObjectRetriever(), al.artHolder);
-	if(hero)
+	if(auto hero = cb->getHero(al.artHolder))
 	{
 		auto art = hero->getArt(al.slot);
 		if(art == nullptr)
@@ -1757,15 +1767,13 @@ void CPlayerInterface::askToAssembleArtifact(const ArtifactLocation &al)
 void CPlayerInterface::artifactPut(const ArtifactLocation &al)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	auto hero = std::visit(HeroObjectRetriever(), al.artHolder);
-	adventureInt->onHeroChanged(hero);
+	adventureInt->onHeroChanged(cb->getHero(al.artHolder));
 }
 
 void CPlayerInterface::artifactRemoved(const ArtifactLocation &al)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	auto hero = std::visit(HeroObjectRetriever(), al.artHolder);
-	adventureInt->onHeroChanged(hero);
+	adventureInt->onHeroChanged(cb->getHero(al.artHolder));
 
 	for(auto artWin : GH.windows().findWindows<CArtifactHolder>())
 		artWin->artifactRemoved(al);
@@ -1776,8 +1784,7 @@ void CPlayerInterface::artifactRemoved(const ArtifactLocation &al)
 void CPlayerInterface::artifactMoved(const ArtifactLocation &src, const ArtifactLocation &dst)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	auto hero = std::visit(HeroObjectRetriever(), dst.artHolder);
-	adventureInt->onHeroChanged(hero);
+	adventureInt->onHeroChanged(cb->getHero(dst.artHolder));
 
 	bool redraw = true;
 	// If a bulk transfer has arrived, then redrawing only the last art movement.
@@ -1802,8 +1809,7 @@ void CPlayerInterface::bulkArtMovementStart(size_t numOfArts)
 void CPlayerInterface::artifactAssembled(const ArtifactLocation &al)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	auto hero = std::visit(HeroObjectRetriever(), al.artHolder);
-	adventureInt->onHeroChanged(hero);
+	adventureInt->onHeroChanged(cb->getHero(al.artHolder));
 
 	for(auto artWin : GH.windows().findWindows<CArtifactHolder>())
 		artWin->artifactAssembled(al);
@@ -1812,21 +1818,20 @@ void CPlayerInterface::artifactAssembled(const ArtifactLocation &al)
 void CPlayerInterface::artifactDisassembled(const ArtifactLocation &al)
 {
 	EVENT_HANDLER_CALLED_BY_CLIENT;
-	auto hero = std::visit(HeroObjectRetriever(), al.artHolder);
-	adventureInt->onHeroChanged(hero);
+	adventureInt->onHeroChanged(cb->getHero(al.artHolder));
 
 	for(auto artWin : GH.windows().findWindows<CArtifactHolder>())
 		artWin->artifactDisassembled(al);
 }
 
-void CPlayerInterface::waitForAllDialogs(bool unlockPim)
+void CPlayerInterface::waitForAllDialogs()
 {
 	while(!dialogs.empty())
 	{
-		auto unlock = vstd::makeUnlockGuardIf(*pim, unlockPim);
+		auto unlockInterface = vstd::makeUnlockGuard(GH.interfaceMutex);
 		boost::this_thread::sleep_for(boost::chrono::milliseconds(5));
 	}
-	waitWhileDialog(unlockPim);
+	waitWhileDialog();
 }
 
 void CPlayerInterface::proposeLoadingGame()

@@ -150,7 +150,9 @@ CInfoWindow::CInfoWindow(std::string Text, PlayerColor player, const TCompsInfo 
 	text = std::make_shared<CTextBox>(Text, Rect(0, 0, 250, 100), 0, FONT_MEDIUM, ETextAlignment::CENTER, Colors::WHITE);
 	if(!text->slider)
 	{
-		text->resize(text->label->textSize);
+		int finalWidth = std::min(250, text->label->textSize.x + 32);
+		int finalHeight = text->label->textSize.y;
+		text->resize(Point(finalWidth, finalHeight));
 	}
 
 	if(buttons.size() == 1)
@@ -351,10 +353,23 @@ void CRClickPopup::createAndPush(const CGObjectInstance * obj, const Point & p, 
 	}
 	else
 	{
+		std::vector<Component> components;
+		if (settings["general"]["enableUiEnhancements"].Bool())
+		{
+			if(LOCPLINT->localState->getCurrentHero())
+				components = obj->getPopupComponents(LOCPLINT->localState->getCurrentHero());
+			else
+				components = obj->getPopupComponents(LOCPLINT->playerID);
+		}
+
+		std::vector<std::shared_ptr<CComponent>> guiComponents;
+		for (auto & component : components)
+			guiComponents.push_back(std::make_shared<CComponent>(component));
+
 		if(LOCPLINT->localState->getCurrentHero())
-			CRClickPopup::createAndPush(obj->getHoverText(LOCPLINT->localState->getCurrentHero()));
+			CRClickPopup::createAndPush(obj->getPopupText(LOCPLINT->localState->getCurrentHero()), guiComponents);
 		else
-			CRClickPopup::createAndPush(obj->getHoverText(LOCPLINT->playerID));
+			CRClickPopup::createAndPush(obj->getPopupText(LOCPLINT->playerID), guiComponents);
 	}
 }
 

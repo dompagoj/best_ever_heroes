@@ -204,7 +204,7 @@ const CGHeroInstance * PlayerLocalState::getWanderingHero(size_t index)
 {
 	if(index < wanderingHeroes.size())
 		return wanderingHeroes[index];
-	return nullptr;
+	throw std::runtime_error("No hero with index " + std::to_string(index));
 }
 
 void PlayerLocalState::addWanderingHero(const CGHeroInstance * hero)
@@ -235,6 +235,14 @@ void PlayerLocalState::removeWanderingHero(const CGHeroInstance * hero)
 		setSelection(ownedTowns.front());
 }
 
+void PlayerLocalState::swapWanderingHero(size_t pos1, size_t pos2)
+{
+	assert(wanderingHeroes[pos1] && wanderingHeroes[pos2]);
+	std::swap(wanderingHeroes.at(pos1), wanderingHeroes.at(pos2));
+
+	adventureInt->onHeroOrderChanged();
+}
+
 const std::vector<const CGTownInstance *> & PlayerLocalState::getOwnedTowns()
 {
 	return ownedTowns;
@@ -244,7 +252,7 @@ const CGTownInstance * PlayerLocalState::getOwnedTown(size_t index)
 {
 	if(index < ownedTowns.size())
 		return ownedTowns[index];
-	return nullptr;
+	throw std::runtime_error("No town with index " + std::to_string(index));
 }
 
 void PlayerLocalState::addOwnedTown(const CGTownInstance * town)
@@ -268,4 +276,12 @@ void PlayerLocalState::removeOwnedTown(const CGTownInstance * town)
 
 	if (currentSelection == nullptr && !ownedTowns.empty())
 		setSelection(ownedTowns.front());
+}
+
+void PlayerLocalState::swapOwnedTowns(size_t pos1, size_t pos2)
+{
+	assert(ownedTowns[pos1] && ownedTowns[pos2]);
+	std::swap(ownedTowns.at(pos1), ownedTowns.at(pos2));
+
+	adventureInt->onTownOrderChanged();
 }

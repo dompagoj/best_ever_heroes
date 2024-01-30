@@ -37,17 +37,8 @@ public:
 	};
 
 private:
-	union JsonData
-	{
-		bool Bool;
-		double Float;
-		std::string* String;
-		JsonVector* Vector;
-		JsonMap* Struct;
-		si64 Integer;
-	};
+	using JsonData = std::variant<std::monostate, bool, double, std::string, JsonVector, JsonMap, si64>;
 
-	JsonType type;
 	JsonData data;
 
 public:
@@ -64,13 +55,6 @@ public:
 	explicit JsonNode(const JsonPath & fileURI);
 	explicit JsonNode(const std::string & modName, const JsonPath & fileURI);
 	explicit JsonNode(const JsonPath & fileURI, bool & isValidSyntax);
-	//Copy c-tor
-	JsonNode(const JsonNode &copy);
-
-	~JsonNode();
-
-	void swap(JsonNode &b);
-	JsonNode& operator =(JsonNode node);
 
 	bool operator == (const JsonNode &other) const;
 	bool operator != (const JsonNode &other) const;
@@ -133,54 +117,22 @@ public:
 
 	std::string toJson(bool compact = false) const;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & meta;
 		h & flags;
-		h & type;
-		switch(type)
-		{
-		case JsonType::DATA_NULL:
-			break;
-		case JsonType::DATA_BOOL:
-			h & data.Bool;
-			break;
-		case JsonType::DATA_FLOAT:
-			h & data.Float;
-			break;
-		case JsonType::DATA_STRING:
-			h & data.String;
-			break;
-		case JsonType::DATA_VECTOR:
-			h & data.Vector;
-			break;
-		case JsonType::DATA_STRUCT:
-			h & data.Struct;
-			break;
-		case JsonType::DATA_INTEGER:
-			h & data.Integer;
-			break;
-		}
+		h & data;
 	}
 };
 
 namespace JsonUtils
 {
-	/**
-	 * @brief parse short bonus format, excluding type
-	 * @note sets duration to Permament
-	 */
-	DLL_LINKAGE void parseTypedBonusShort(const JsonVector & source, const std::shared_ptr<Bonus> & dest);
-
-	///
 	DLL_LINKAGE std::shared_ptr<Bonus> parseBonus(const JsonVector & ability_vec);
 	DLL_LINKAGE std::shared_ptr<Bonus> parseBonus(const JsonNode & ability);
-	DLL_LINKAGE std::shared_ptr<Bonus> parseBuildingBonus(const JsonNode & ability, const BuildingID & building, const std::string & description);
+	DLL_LINKAGE std::shared_ptr<Bonus> parseBuildingBonus(const JsonNode & ability, const FactionID & faction, const BuildingID & building, const std::string & description);
 	DLL_LINKAGE bool parseBonus(const JsonNode & ability, Bonus * placement);
 	DLL_LINKAGE std::shared_ptr<ILimiter> parseLimiter(const JsonNode & limiter);
 	DLL_LINKAGE CSelector parseSelector(const JsonNode &ability);
-	DLL_LINKAGE void resolveIdentifier(si32 & var, const JsonNode & node, const std::string & name);
-	DLL_LINKAGE void resolveIdentifier(const JsonNode & node, si32 & var);
 	DLL_LINKAGE void resolveAddInfo(CAddInfo & var, const JsonNode & node);
 
 	/**
@@ -295,8 +247,8 @@ namespace JsonDetail
 		static Type convert(const JsonNode & node)
 		{
 			///this should be triggered only for numeric types and enums
-			static_assert(boost::mpl::or_<std::is_arithmetic<Type>, std::is_enum<Type>, boost::is_class<Type> >::value, "Unsupported type for JsonNode::convertTo()!");
-			return JsonConvImpl<Type, boost::mpl::or_<std::is_enum<Type>, boost::is_class<Type> >::value >::convertImpl(node);
+			static_assert(std::is_arithmetic_v<Type> || std::is_enum_v<Type> || std::is_class_v<Type>, "Unsupported type for JsonNode::convertTo()!");
+			return JsonConvImpl<Type, std::is_enum_v<Type> || std::is_class_v<Type> >::convertImpl(node);
 
 		}
 	};

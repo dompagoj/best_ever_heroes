@@ -12,6 +12,7 @@
 #include "../gui/CIntObject.h"
 #include "CConfigHandler.h"
 #include "../../lib/filesystem/ResourcePath.h"
+#include "../../lib/networkPacks/Component.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -159,7 +160,7 @@ private:
 
 	void tick(uint32_t msPassed) override;
 
-	void clickReleased(const Point & cursorPosition) override;
+	void clickReleased(const Point & cursorPosition, bool lastActivated) override;
 	void showPopupWindow(const Point & cursorPosition) override;
 	void hover(bool on) override;
 

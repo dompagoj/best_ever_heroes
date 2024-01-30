@@ -51,6 +51,9 @@
 					"text": "vcmi.systemOptions.framerateButton.hover"
 				},
 				{
+					"text": "vcmi.systemOptions.enableLargeSpellbookButton.hover"
+				},
+				{
 					"text": "core.genrltxt.577"
 				},
 				{
@@ -65,6 +68,35 @@
 				{
 					"text": "vcmi.systemOptions.enableUiEnhancementsButton.hover"
 				}
+			]
+		},
+		{
+			"type" : "verticalLayout",
+			"customType" : "checkboxFake",
+			"position" : {"x": 10, "y": 83},
+			"items" : [
+				{
+					"created" : "desktop"
+				},
+				{},
+				{
+					"created" : "desktop"
+				},
+				{
+					"created" : "desktop"
+				},
+				{},
+				{},
+				{
+					"name": "spellbookAnimationCheckboxPlaceholder"
+				},
+				{
+					"created" : "touchscreen"
+				},
+				{
+					"created" : "mobile"
+				},
+				{}
 			]
 		},
 		{
@@ -101,6 +133,11 @@
 					"name": "framerateCheckbox",
 					"help": "vcmi.systemOptions.framerateButton",
 					"callback": "framerateChanged"
+				},
+				{
+					"name": "enableLargeSpellbookCheckbox",
+					"help": "vcmi.systemOptions.enableLargeSpellbookButton",
+					"callback": "enableLargeSpellbookChanged"
 				},
 				{
 					"name": "spellbookAnimationCheckbox",
@@ -171,6 +208,28 @@
 			"name": "soundValueLabel",
 			"type": "labelCentered",
 			"position": {"x": 565, "y": 158}
+		},
+		{
+			"type" : "verticalLayout",
+			"customType" : "labelDescription",
+			"position" : {"x": 415, "y": 202},
+			"items" : [
+				{
+					"text": "vcmi.systemOptions.audioMuteFocus.hover"
+				}
+			]
+		},
+		{
+			"type" : "verticalLayout",
+			"customType" : "checkbox",
+			"position" : {"x": 380, "y": 200},
+			"items" : [
+				{
+					"name": "audioMuteFocusCheckbox",
+					"help": "vcmi.systemOptions.audioMuteFocus",
+					"callback": "audioMuteFocusChanged"
+				}
+			]
 		},
 /////////////////////////////////////// Bottom section - Towns Settings
 		{

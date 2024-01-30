@@ -106,17 +106,10 @@ ObstacleInfo * ObstacleHandler::loadFromJson(const std::string & scope, const Js
 	info->isAbsoluteObstacle = json["absolute"].Bool();
 	info->isForegroundObstacle = json["foreground"].Bool();
 
-	objects.emplace_back(info);
-
 	return info;
 }
 
 std::vector<JsonNode> ObstacleHandler::loadLegacyData()
-{
-	return {};
-}
-
-std::vector<bool> ObstacleHandler::getDefaultAllowed() const
 {
 	return {};
 }

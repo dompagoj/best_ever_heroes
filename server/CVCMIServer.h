@@ -55,7 +55,8 @@ class CVCMIServer : public LobbyInfo
 	std::list<std::unique_ptr<CPackForLobby>> announceQueue;
 	boost::recursive_mutex mx;
 	std::shared_ptr<CApplier<CBaseForServerApply>> applier;
-	std::unique_ptr<boost::thread> announceLobbyThread, remoteConnectionsThread;
+	std::unique_ptr<boost::thread> announceLobbyThread;
+	std::unique_ptr<boost::thread> remoteConnectionsThread;
 	std::atomic<EServerState> state;
 
 public:
@@ -64,6 +65,7 @@ public:
 
 	boost::program_options::variables_map cmdLineOptions;
 	std::set<std::shared_ptr<CConnection>> connections;
+	std::set<std::shared_ptr<CConnection>> remoteConnections;
 	std::set<std::shared_ptr<CConnection>> hangingConnections; //keep connections of players disconnected during the game
 	
 	std::atomic<int> currentClientId;
@@ -78,7 +80,7 @@ public:
 	void startGameImmidiately();
 
 	void establishRemoteConnections();
-	void connectToRemote(const std::string & addr, int port);
+	void connectToRemote();
 	void startAsyncAccept();
 	void connectionAccepted(const boost::system::error_code & ec);
 	void threadHandleClient(std::shared_ptr<CConnection> c);
@@ -106,15 +108,16 @@ public:
 
 	// Work with LobbyInfo
 	void setPlayer(PlayerColor clickedColor);
+	void setPlayerName(PlayerColor player, std::string name);
 	void optionNextHero(PlayerColor player, int dir); //dir == -1 or +1
-	void optionSetHero(PlayerColor player, int id);
-	HeroTypeID nextAllowedHero(PlayerColor player, int min, int max, int incl, int dir);
-	bool canUseThisHero(PlayerColor player, int ID);
-	std::vector<int> getUsedHeroes();
+	void optionSetHero(PlayerColor player, HeroTypeID id);
+	HeroTypeID nextAllowedHero(PlayerColor player, HeroTypeID id, int direction);
+	bool canUseThisHero(PlayerColor player, HeroTypeID ID);
+	std::vector<HeroTypeID> getUsedHeroes();
 	void optionNextBonus(PlayerColor player, int dir); //dir == -1 or +1
-	void optionSetBonus(PlayerColor player, int id);
+	void optionSetBonus(PlayerColor player, PlayerStartingBonus id);
 	void optionNextCastle(PlayerColor player, int dir); //dir == -1 or +
-	void optionSetCastle(PlayerColor player, int id);
+	void optionSetCastle(PlayerColor player, FactionID id);
 
 	// Campaigns
 	void setCampaignMap(CampaignScenarioID mapId);

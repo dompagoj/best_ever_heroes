@@ -12,10 +12,10 @@
 #include "DemonSummon.h"
 #include "Registry.h"
 #include "../ISpellMechanics.h"
-#include "../../NetPacks.h"
 #include "../../battle/CBattleInfoCallback.h"
 #include "../../battle/BattleInfo.h"
 #include "../../battle/CUnitState.h"
+#include "../../networkPacks/PacksForClientBattle.h"
 #include "../../serializer/JsonSerializeFormat.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
@@ -49,7 +49,7 @@ void DemonSummon::apply(ServerCallback * server, const Mechanics * m, const Effe
 			break;
 		}
 
-		const auto *creatureType = creature.toCreature(m->creatures());
+		const auto *creatureType = creature.toEntity(m->creatures());
 
 		int32_t deadCount         = targetStack->unitBaseAmount();
 		int32_t deadTotalHealth   = targetStack->getTotalHealth();
@@ -111,7 +111,7 @@ bool DemonSummon::isValidTarget(const Mechanics * m, const battle::Unit * unit) 
 	if (unit->isGhost())
 		return false;
 
-	const auto *creatureType = creature.toCreature(m->creatures());
+	const auto *creatureType = creature.toEntity(m->creatures());
 
 	if (unit->getTotalHealth() < creatureType->getMaxHealth())
 		return false;

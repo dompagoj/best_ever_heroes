@@ -34,10 +34,6 @@ public:
 	/// If set to true, iamge will be redrawn on each frame
 	bool needRefresh;
 
-	/// If set to false, image will not be rendered
-	/// Deprecated, use CIntObject::disable()/enable() instead
-	bool visible;
-
 	std::shared_ptr<IImage> getSurface()
 	{
 		return bg;
@@ -56,7 +52,7 @@ public:
 
 	/// set alpha value for whole surface. Note: may be messed up if surface is shared
 	/// 0=transparent, 255=opaque
-	void setAlpha(int value);
+	void setAlpha(uint8_t value);
 	void scaleTo(Point size);
 	void colorize(PlayerColor player);
 
@@ -95,7 +91,7 @@ private:
 	size_t frame;
 	size_t group;
 	ui8 flags;
-	const Point scaledSize;
+	Point scaledSize;
 
 	/// If set, then image is colored using player-specific palette
 	std::optional<PlayerColor> player;
@@ -124,6 +120,10 @@ public:
 	bool isPlayerColored() const;
 
 	void showAll(Canvas & to) override;
+
+	void setAnimationPath(const AnimationPath & name, size_t frame);
+
+	void setScale(Point scale);
 };
 
 /// Base class for displaying animation, used as superclass for different animations

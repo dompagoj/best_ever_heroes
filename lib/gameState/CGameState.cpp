@@ -36,13 +36,15 @@
 #include "../mapObjectConstructors/DwellingInstanceConstructor.h"
 #include "../mapObjects/CGHeroInstance.h"
 #include "../mapObjects/CGTownInstance.h"
+#include "../mapObjects/CQuest.h"
+#include "../mapObjects/MiscObjects.h"
 #include "../mapping/CMap.h"
 #include "../mapping/CMapEditManager.h"
 #include "../mapping/CMapService.h"
 #include "../modding/IdentifierStorage.h"
 #include "../pathfinder/CPathfinder.h"
 #include "../pathfinder/PathfinderOptions.h"
-#include "../registerTypes/RegisterTypes.h"
+#include "../registerTypes/RegisterTypesClientPacks.h"
 #include "../rmg/CMapGenerator.h"
 #include "../serializer/CMemorySerializer.h"
 #include "../serializer/CTypeList.h"
@@ -77,34 +79,6 @@ public:
 	}
 };
 
-static CGObjectInstance * createObject(const Obj & id, int subid, const int3 & pos, const PlayerColor & owner)
-{
-	CGObjectInstance * nobj;
-	switch(id)
-	{
-	case Obj::HERO:
-		{
-			auto handler = VLC->objtypeh->getHandlerFor(id, VLC->heroh->objects[subid]->heroClass->getIndex());
-			nobj = handler->create(handler->getTemplates().front());
-			break;
-		}
-	case Obj::TOWN:
-		nobj = new CGTownInstance();
-		break;
-	default: //rest of objects
-		nobj = new CGObjectInstance();
-		break;
-	}
-	nobj->ID = id;
-	nobj->subID = subid;
-	nobj->pos = pos;
-	nobj->tempOwner = owner;
-	if (id != Obj::HERO)
-		nobj->appearance = VLC->objtypeh->getHandlerFor(id, subid)->getTemplates().front();
-
-	return nobj;
-}
-
 HeroTypeID CGameState::pickNextHeroType(const PlayerColor & owner)
 {
 	const PlayerSettings &ps = scenarioOps->getIthPlayersSettings(owner);
@@ -125,7 +99,7 @@ HeroTypeID CGameState::pickUnusedHeroTypeRandomly(const PlayerColor & owner)
 	const PlayerSettings &ps = scenarioOps->getIthPlayersSettings(owner);
 	for(const HeroTypeID & hid : getUnusedAllowedHeroes())
 	{
-		if(VLC->heroh->objects[hid.getNum()]->heroClass->faction == ps.castle)
+		if(hid.toHeroType()->heroClass->faction == ps.castle)
 			factionHeroes.push_back(hid);
 		else
 			otherHeroes.push_back(hid);
@@ -149,225 +123,7 @@ HeroTypeID CGameState::pickUnusedHeroTypeRandomly(const PlayerColor & owner)
 		return *notAllowedHeroesButStillBetterThanCrash.begin();
 
 	logGlobal->error("No free heroes at all!");
-	assert(0); //current code can't handle this situation
-	return HeroTypeID::NONE; // no available heroes at all
-}
-
-std::pair<Obj,int> CGameState::pickObject (CGObjectInstance *obj)
-{
-	switch(obj->ID)
-	{
-	case Obj::RANDOM_ART:
-		return std::make_pair(Obj::ARTIFACT, VLC->arth->pickRandomArtifact(getRandomGenerator(), CArtifact::ART_TREASURE | CArtifact::ART_MINOR | CArtifact::ART_MAJOR | CArtifact::ART_RELIC));
-	case Obj::RANDOM_TREASURE_ART:
-		return std::make_pair(Obj::ARTIFACT, VLC->arth->pickRandomArtifact(getRandomGenerator(), CArtifact::ART_TREASURE));
-	case Obj::RANDOM_MINOR_ART:
-		return std::make_pair(Obj::ARTIFACT, VLC->arth->pickRandomArtifact(getRandomGenerator(), CArtifact::ART_MINOR));
-	case Obj::RANDOM_MAJOR_ART:
-		return std::make_pair(Obj::ARTIFACT, VLC->arth->pickRandomArtifact(getRandomGenerator(), CArtifact::ART_MAJOR));
-	case Obj::RANDOM_RELIC_ART:
-		return std::make_pair(Obj::ARTIFACT, VLC->arth->pickRandomArtifact(getRandomGenerator(), CArtifact::ART_RELIC));
-	case Obj::RANDOM_HERO:
-		return std::make_pair(Obj::HERO, pickNextHeroType(obj->tempOwner));
-	case Obj::RANDOM_MONSTER:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator()));
-	case Obj::RANDOM_MONSTER_L1:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator(), 1));
-	case Obj::RANDOM_MONSTER_L2:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator(), 2));
-	case Obj::RANDOM_MONSTER_L3:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator(), 3));
-	case Obj::RANDOM_MONSTER_L4:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator(), 4));
-	case Obj::RANDOM_RESOURCE:
-		return std::make_pair(Obj::RESOURCE,getRandomGenerator().nextInt(6)); //now it's OH3 style, use %8 for mithril
-	case Obj::RANDOM_TOWN:
-		{
-			PlayerColor align = (dynamic_cast<CGTownInstance *>(obj))->alignmentToPlayer;
-			si32 f; // can be negative (for random)
-			if(!align.isValidPlayer()) //same as owner / random
-			{
-				if(!obj->tempOwner.isValidPlayer())
-					f = -1; //random
-				else
-					f = scenarioOps->getIthPlayersSettings(obj->tempOwner).castle;
-			}
-			else
-			{
-				f = scenarioOps->getIthPlayersSettings(align).castle;
-			}
-			if(f<0)
-			{
-				do
-				{
-					f = getRandomGenerator().nextInt((int)VLC->townh->size() - 1);
-				}
-				while ((*VLC->townh)[f]->town == nullptr); // find playable faction
-			}
-			return std::make_pair(Obj::TOWN,f);
-		}
-	case Obj::RANDOM_MONSTER_L5:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator(), 5));
-	case Obj::RANDOM_MONSTER_L6:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator(), 6));
-	case Obj::RANDOM_MONSTER_L7:
-		return std::make_pair(Obj::MONSTER, VLC->creh->pickRandomMonster(getRandomGenerator(), 7));
-	case Obj::RANDOM_DWELLING:
-	case Obj::RANDOM_DWELLING_LVL:
-	case Obj::RANDOM_DWELLING_FACTION:
-		{
-			auto * dwl = dynamic_cast<CGDwelling *>(obj);
-			int faction;
-
-			//if castle alignment available
-			if(auto * info = dynamic_cast<CCreGenAsCastleInfo *>(dwl->info))
-			{
-				faction = getRandomGenerator().nextInt((int)VLC->townh->size() - 1);
-				if(info->asCastle && !info->instanceId.empty())
-				{
-					auto iter = map->instanceNames.find(info->instanceId);
-
-					if(iter == map->instanceNames.end())
-						logGlobal->error("Map object not found: %s", info->instanceId);
-					else
-					{
-						auto elem = iter->second;
-						if(elem->ID==Obj::RANDOM_TOWN)
-						{
-							randomizeObject(elem.get()); //we have to randomize the castle first
-							faction = elem->subID;
-						}
-						else if(elem->ID==Obj::TOWN)
-							faction = elem->subID;
-						else
-							logGlobal->error("Map object must be town: %s", info->instanceId);
-					}
-				}
-				else if(info->asCastle)
-				{
-
-					for(auto & elem : map->objects)
-					{
-						if(!elem)
-							continue;
-
-						if(elem->ID==Obj::RANDOM_TOWN
-							&& dynamic_cast<CGTownInstance*>(elem.get())->identifier == info->identifier)
-						{
-							randomizeObject(elem); //we have to randomize the castle first
-							faction = elem->subID;
-							break;
-						}
-						else if(elem->ID==Obj::TOWN
-							&& dynamic_cast<CGTownInstance*>(elem.get())->identifier == info->identifier)
-						{
-							faction = elem->subID;
-							break;
-						}
-					}
-				}
-				else
-				{
-					std::set<int> temp;
-
-					for(int i = 0; i < info->allowedFactions.size(); i++)
-						if(info->allowedFactions[i])
-							temp.insert(i);
-
-					if(temp.empty())
-						logGlobal->error("Random faction selection failed. Nothing is allowed. Fall back to random.");
-					else
-						faction = *RandomGeneratorUtil::nextItem(temp, getRandomGenerator());
-				}
-			}
-			else // castle alignment fixed
-				faction = obj->subID;
-
-			int level;
-
-			//if level set to range
-			if(auto * info = dynamic_cast<CCreGenLeveledInfo *>(dwl->info))
-			{
-				level = getRandomGenerator().nextInt(info->minLevel, info->maxLevel) - 1;
-			}
-			else // fixed level
-			{
-				level = obj->subID;
-			}
-
-			delete dwl->info;
-			dwl->info = nullptr;
-
-			std::pair<Obj, int> result(Obj::NO_OBJ, -1);
-			CreatureID cid;
-			if((*VLC->townh)[faction]->town)
-				cid = (*VLC->townh)[faction]->town->creatures[level][0];
-			else
-			{
-				//neutral faction
-				std::vector<CCreature*> possibleCreatures;
-				std::copy_if(VLC->creh->objects.begin(), VLC->creh->objects.end(), std::back_inserter(possibleCreatures), [faction](const CCreature * c)
-				{
-					return c->getFaction().getNum() == faction;
-				});
-				assert(!possibleCreatures.empty());
-				cid = (*RandomGeneratorUtil::nextItem(possibleCreatures, getRandomGenerator()))->getId();
-			}
-
-			//NOTE: this will pick last dwelling with this creature (Mantis #900)
-			//check for block map equality is better but more complex solution
-			auto testID = [&](const Obj & primaryID) -> void
-			{
-				auto dwellingIDs = VLC->objtypeh->knownSubObjects(primaryID);
-				for (si32 entry : dwellingIDs)
-				{
-					const auto * handler = dynamic_cast<const DwellingInstanceConstructor *>(VLC->objtypeh->getHandlerFor(primaryID, entry).get());
-
-					if (handler->producesCreature(VLC->creh->objects[cid]))
-						result = std::make_pair(primaryID, entry);
-				}
-			};
-
-			testID(Obj::CREATURE_GENERATOR1);
-			if (result.first == Obj::NO_OBJ)
-				testID(Obj::CREATURE_GENERATOR4);
-
-			if (result.first == Obj::NO_OBJ)
-			{
-				logGlobal->error("Error: failed to find dwelling for %s of level %d", (*VLC->townh)[faction]->getNameTranslated(), int(level));
-				result = std::make_pair(Obj::CREATURE_GENERATOR1, *RandomGeneratorUtil::nextItem(VLC->objtypeh->knownSubObjects(Obj::CREATURE_GENERATOR1), getRandomGenerator()));
-			}
-
-			return result;
-		}
-	}
-	return std::make_pair(Obj::NO_OBJ,-1);
-}
-
-void CGameState::randomizeObject(CGObjectInstance *cur)
-{
-	std::pair<Obj,int> ran = pickObject(cur);
-	if(ran.first == Obj::NO_OBJ || ran.second<0) //this is not a random object, or we couldn't find anything
-	{
-		if(cur->ID==Obj::TOWN || cur->ID==Obj::MONSTER)
-			cur->setType(cur->ID, cur->subID); // update def, if necessary
-	}
-	else if(ran.first==Obj::HERO)//special code for hero
-	{
-		auto * h = dynamic_cast<CGHeroInstance *>(cur);
-		cur->setType(ran.first, ran.second);
-		map->heroesOnMap.emplace_back(h);
-	}
-	else if(ran.first==Obj::TOWN)//special code for town
-	{
-		auto * t = dynamic_cast<CGTownInstance *>(cur);
-		cur->setType(ran.first, ran.second);
-		map->towns.emplace_back(t);
-	}
-	else
-	{
-		cur->setType(ran.first, ran.second);
-	}
+	throw std::runtime_error("Can not allocate hero. All heroes are already used.");
 }
 
 int CGameState::getDate(Date mode) const
@@ -402,24 +158,29 @@ CGameState::CGameState()
 	gs = this;
 	heroesPool = std::make_unique<TavernHeroesPool>();
 	applier = std::make_shared<CApplier<CBaseForGSApply>>();
-	registerTypesClientPacks1(*applier);
-	registerTypesClientPacks2(*applier);
+	registerTypesClientPacks(*applier);
 	globalEffects.setNodeType(CBonusSystemNode::GLOBAL_EFFECTS);
 }
 
 CGameState::~CGameState()
 {
+	// explicitly delete all ongoing battles first - BattleInfo destructor requires valid CGameState
+	currentBattles.clear();
 	map.dellNull();
+	scenarioOps.dellNull();
+	initialOpts.dellNull();
 }
 
-void CGameState::preInit(Services * services)
+void CGameState::preInit(Services * newServices, IGameCallback * newCallback)
 {
-	this->services = services;
+	services = newServices;
+	callback = newCallback;
 }
 
 void CGameState::init(const IMapService * mapService, StartInfo * si, Load::ProgressAccumulator & progressTracking, bool allowSavingRandomMap)
 {
-	preInitAuto();
+	assert(services);
+	assert(callback);
 	logGlobal->info("\tUsing random seed: %d", si->seedToBeUsed);
 	getRandomGenerator().setSeed(si->seedToBeUsed);
 	scenarioOps = CMemorySerializer::deepCopy(*si).release();
@@ -438,7 +199,6 @@ void CGameState::init(const IMapService * mapService, StartInfo * si, Load::Prog
 		logGlobal->error("Wrong mode: %d", static_cast<int>(scenarioOps->mode));
 		return;
 	}
-	VLC->arth->initAllowedArtifactsList(map->allowedArtifact);
 	logGlobal->info("Map loaded!");
 
 	checkMapChecksum();
@@ -466,14 +226,9 @@ void CGameState::init(const IMapService * mapService, StartInfo * si, Load::Prog
 	initVisitingAndGarrisonedHeroes();
 	initFogOfWar();
 
-	// Explicitly initialize static variables
-	for(auto & elem : players)
-	{
-		CGKeys::playerKeyMap[elem.first] = std::set<ui8>();
-	}
 	for(auto & elem : teams)
 	{
-		CGObelisk::visited[elem.first] = 0;
+		map->obelisksVisited[elem.first] = 0;
 	}
 
 	logGlobal->debug("\tChecking objectives");
@@ -533,19 +288,11 @@ void CGameState::updateEntity(Metatype metatype, int32_t index, const JsonNode &
 
 void CGameState::updateOnLoad(StartInfo * si)
 {
-	preInitAuto();
+	assert(services);
+	assert(callback);
 	scenarioOps->playerInfos = si->playerInfos;
 	for(auto & i : si->playerInfos)
 		gs->players[i.first].human = i.second.isControlledByHuman();
-}
-
-void CGameState::preInitAuto()
-{
-	if(services == nullptr)
-	{
-		logGlobal->error("Game state preinit missing");
-		preInit(VLC);
-	}
 }
 
 void CGameState::initNewGame(const IMapService * mapService, bool allowSavingRandomMap, Load::ProgressAccumulator & progressTracking)
@@ -556,7 +303,7 @@ void CGameState::initNewGame(const IMapService * mapService, bool allowSavingRan
 		CStopWatch sw;
 
 		// Gen map
-		CMapGenerator mapGenerator(*scenarioOps->mapGenOptions, scenarioOps->seedToBeUsed);
+		CMapGenerator mapGenerator(*scenarioOps->mapGenOptions, callback, scenarioOps->seedToBeUsed);
 		progressTracking.include(mapGenerator);
 
 		std::unique_ptr<CMap> randomMap = mapGenerator.generate();
@@ -566,16 +313,19 @@ void CGameState::initNewGame(const IMapService * mapService, bool allowSavingRan
 		{
 			try
 			{
-				auto path = VCMIDirs::get().userCachePath() / "RandomMaps";
+				auto path = VCMIDirs::get().userDataPath() / "Maps" / "RandomMaps";
 				boost::filesystem::create_directories(path);
 
 				std::shared_ptr<CMapGenOptions> options = scenarioOps->mapGenOptions;
 
 				const std::string templateName = options->getMapTemplate()->getName();
 				const ui32 seed = scenarioOps->seedToBeUsed;
+				const std::string dt = vstd::getDateTimeISO8601Basic(std::time(nullptr));
 
-				const std::string fileName = boost::str(boost::format("%s_%d.vmap") % templateName % seed );
+				const std::string fileName = boost::str(boost::format("%s_%s_%d.vmap") % dt % templateName % seed );
 				const auto fullPath = path / fileName;
+
+				randomMap->name.appendRawString(boost::str(boost::format(" %s") % dt));
 
 				mapService->saveMap(randomMap, fullPath);
 
@@ -616,7 +366,7 @@ void CGameState::initNewGame(const IMapService * mapService, bool allowSavingRan
 	{
 		logGlobal->info("Open map file: %s", scenarioOps->mapname);
 		const ResourcePath mapURI(scenarioOps->mapname, EResType::MAP);
-		map = mapService->loadMap(mapURI).release();
+		map = mapService->loadMap(mapURI, callback).release();
 	}
 }
 
@@ -652,7 +402,7 @@ void CGameState::initGlobalBonuses()
 	{
 		auto bonus = JsonUtils::parseBonus(b.second);
 		bonus->source = BonusSource::GLOBAL;//for all
-		bonus->sid = -1; //there is one global object
+		bonus->sid = BonusSourceID(); //there is one global object
 		globalEffects.addNewBonus(bonus);
 	}
 	VLC->creh->loadCrExpBon(globalEffects);
@@ -759,20 +509,21 @@ void CGameState::initRandomFactionsForPlayers()
 void CGameState::randomizeMapObjects()
 {
 	logGlobal->debug("\tRandomizing objects");
-	for(CGObjectInstance *obj : map->objects)
+	for(CGObjectInstance *object : map->objects)
 	{
-		if(!obj) continue;
+		if(!object)
+			continue;
 
-		randomizeObject(obj);
+		object->pickRandomObject(getRandomGenerator());
 
 		//handle Favouring Winds - mark tiles under it
-		if(obj->ID == Obj::FAVORABLE_WINDS)
+		if(object->ID == Obj::FAVORABLE_WINDS)
 		{
-			for (int i = 0; i < obj->getWidth() ; i++)
+			for (int i = 0; i < object->getWidth() ; i++)
 			{
-				for (int j = 0; j < obj->getHeight() ; j++)
+				for (int j = 0; j < object->getHeight() ; j++)
 				{
-					int3 pos = obj->pos - int3(i,j,0);
+					int3 pos = object->pos - int3(i,j,0);
 					if(map->isInTheMap(pos)) map->getTile(pos).extTileFlags |= 128;
 				}
 			}
@@ -805,7 +556,15 @@ void CGameState::placeStartingHero(const PlayerColor & playerColor, const HeroTy
 		}
 	}
 
-	CGObjectInstance * hero = createObject(Obj::HERO, heroTypeId.getNum(), townPos, playerColor);
+	auto handler = VLC->objtypeh->getHandlerFor(Obj::HERO, heroTypeId.toHeroType()->heroClass->getIndex());
+	CGObjectInstance * obj = handler->create(callback, handler->getTemplates().front());
+	CGHeroInstance * hero = dynamic_cast<CGHeroInstance *>(obj);
+
+	hero->ID = Obj::HERO;
+	hero->setHeroType(heroTypeId);
+	hero->tempOwner = playerColor;
+
+	hero->pos = townPos;
 	hero->pos += hero->getVisitableOffset();
 	map->getEditManager()->insertObject(hero);
 }
@@ -824,7 +583,7 @@ void CGameState::placeStartingHeroes()
 			if (campaign && campaign->playerHasStartingHero(playerColor))
 				continue;
 
-			int heroTypeId = pickNextHeroType(playerColor);
+			HeroTypeID heroTypeId = pickNextHeroType(playerColor);
 			if(playerSettingPair.second.hero == HeroTypeID::NONE)
 				playerSettingPair.second.hero = heroTypeId;
 
@@ -861,7 +620,7 @@ void CGameState::initHeroes()
 
 		hero->initHero(getRandomGenerator());
 		getPlayerState(hero->getOwner())->heroes.push_back(hero);
-		map->allHeroes[hero->type->getIndex()] = hero;
+		map->allHeroes[hero->getHeroType().getNum()] = hero;
 	}
 
 	// generate boats for all heroes on water
@@ -872,11 +631,9 @@ void CGameState::initHeroes()
 		if (tile.terType->isWater())
 		{
 			auto handler = VLC->objtypeh->getHandlerFor(Obj::BOAT, hero->getBoatType().getNum());
-			CGBoat * boat = dynamic_cast<CGBoat*>(handler->create());
+			auto boat = dynamic_cast<CGBoat*>(handler->create(callback, nullptr));
 			handler->configureObject(boat, gs->getRandomGenerator());
 
-			boat->ID = Obj::BOAT;
-			boat->subID = hero->getBoatType().getNum();
 			boat->pos = hero->pos;
 			boat->appearance = handler->getTemplates().front();
 			boat->id = ObjectInstanceID(static_cast<si32>(gs->map->objects.size()));
@@ -891,24 +648,28 @@ void CGameState::initHeroes()
 	for(auto obj : map->objects) //prisons
 	{
 		if(obj && obj->ID == Obj::PRISON)
-			map->allHeroes[obj->subID] = dynamic_cast<CGHeroInstance*>(obj.get());
+		{
+			auto * hero = dynamic_cast<CGHeroInstance*>(obj.get());
+			hero->initHero(getRandomGenerator());
+			map->allHeroes[hero->getHeroType().getNum()] = hero;
+		}
 	}
 
 	std::set<HeroTypeID> heroesToCreate = getUnusedAllowedHeroes(); //ids of heroes to be created and put into the pool
 	for(auto ph : map->predefinedHeroes)
 	{
-		if(!vstd::contains(heroesToCreate, HeroTypeID(ph->subID)))
+		if(!vstd::contains(heroesToCreate, ph->getHeroType()))
 			continue;
 		ph->initHero(getRandomGenerator());
 		heroesPool->addHeroToPool(ph);
 		heroesToCreate.erase(ph->type->getId());
 
-		map->allHeroes[ph->subID] = ph;
+		map->allHeroes[ph->getHeroType().getNum()] = ph;
 	}
 
 	for(const HeroTypeID & htype : heroesToCreate) //all not used allowed heroes go with default state into the pool
 	{
-		auto * vhi = new CGHeroInstance();
+		auto * vhi = new CGHeroInstance(callback);
 		vhi->initHero(getRandomGenerator(), htype);
 
 		int typeID = htype.getNum();
@@ -930,7 +691,7 @@ void CGameState::initFogOfWar()
 	int layers = map->levels();
 	for(auto & elem : teams)
 	{
-		auto fow = elem.second.fogOfWarMap;
+		auto & fow = elem.second.fogOfWarMap;
 		fow->resize(boost::extents[layers][map->width][map->height]);
 		std::fill(fow->data(), fow->data() + fow->num_elements(), 0);
 
@@ -939,7 +700,7 @@ void CGameState::initFogOfWar()
 			if(!obj || !vstd::contains(elem.second.players, obj->tempOwner)) continue; //not a flagged object
 
 			std::unordered_set<int3> tiles;
-			getTilesInRange(tiles, obj->getSightCenter(), obj->getSightRadius(), obj->tempOwner, 1);
+			getTilesInRange(tiles, obj->getSightCenter(), obj->getSightRadius(), ETileVisibility::HIDDEN, obj->tempOwner);
 			for(const int3 & tile : tiles)
 			{
 				(*elem.second.fogOfWarMap)[tile.z][tile.x][tile.y] = 1;
@@ -959,14 +720,15 @@ void CGameState::initStartingBonus()
 	for(auto & elem : players)
 	{
 		//starting bonus
-		if(scenarioOps->playerInfos[elem.first].bonus==PlayerSettings::RANDOM)
-			scenarioOps->playerInfos[elem.first].bonus = static_cast<PlayerSettings::Ebonus>(getRandomGenerator().nextInt(2));
+		if(scenarioOps->playerInfos[elem.first].bonus == PlayerStartingBonus::RANDOM)
+			scenarioOps->playerInfos[elem.first].bonus = static_cast<PlayerStartingBonus>(getRandomGenerator().nextInt(2));
+
 		switch(scenarioOps->playerInfos[elem.first].bonus)
 		{
-		case PlayerSettings::GOLD:
+		case PlayerStartingBonus::GOLD:
 			elem.second.resources[EGameResID::GOLD] += getRandomGenerator().nextInt(5, 10) * 100;
 			break;
-		case PlayerSettings::RESOURCE:
+		case PlayerStartingBonus::RESOURCE:
 			{
 				auto res = (*VLC->townh)[scenarioOps->playerInfos[elem.first].castle]->town->primaryRes;
 				if(res == EGameResID::WOOD_AND_ORE)
@@ -981,14 +743,14 @@ void CGameState::initStartingBonus()
 				}
 				break;
 			}
-		case PlayerSettings::ARTIFACT:
+		case PlayerStartingBonus::ARTIFACT:
 			{
 				if(elem.second.heroes.empty())
 				{
 					logGlobal->error("Cannot give starting artifact - no heroes!");
 					break;
 				}
-				const Artifact * toGive = VLC->arth->pickRandomArtifact(getRandomGenerator(), CArtifact::ART_TREASURE).toArtifact(VLC->artifacts());
+				const Artifact * toGive = pickRandomArtifact(getRandomGenerator(), CArtifact::ART_TREASURE).toEntity(VLC);
 
 				CGHeroInstance *hero = elem.second.heroes[0];
 				if(!giveHeroArtifact(hero, toGive->getId()))
@@ -1006,21 +768,21 @@ void CGameState::initTowns()
 	if (campaign)
 		campaign->initTowns();
 
-	CGTownInstance::universitySkills.clear();
-	for ( int i=0; i<4; i++)
-		CGTownInstance::universitySkills.push_back(14+i);//skills for university
+	map->townUniversitySkills.clear();
+	map->townUniversitySkills.push_back(SecondarySkill(SecondarySkill::FIRE_MAGIC));
+	map->townUniversitySkills.push_back(SecondarySkill(SecondarySkill::AIR_MAGIC));
+	map->townUniversitySkills.push_back(SecondarySkill(SecondarySkill::WATER_MAGIC));
+	map->townUniversitySkills.push_back(SecondarySkill(SecondarySkill::EARTH_MAGIC));
 
 	for (auto & elem : map->towns)
 	{
 		CGTownInstance * vti =(elem);
-		if(!vti->town)
-		{
-			vti->town = (*VLC->townh)[vti->subID]->town;
-		}
-		if(vti->getNameTranslated().empty())
+		assert(vti->town);
+
+		if(vti->getNameTextID().empty())
 		{
 			size_t nameID = getRandomGenerator().nextInt(vti->getTown()->getRandomNamesCount() - 1);
-			vti->setNameTranslated(vti->getTown()->getRandomNameTranslated(nameID));
+			vti->setNameTextId(vti->getTown()->getRandomNameTextID(nameID));
 		}
 
 		static const BuildingID basicDwellings[] = { BuildingID::DWELL_FIRST, BuildingID::DWELL_LVL_2, BuildingID::DWELL_LVL_3, BuildingID::DWELL_LVL_4, BuildingID::DWELL_LVL_5, BuildingID::DWELL_LVL_6, BuildingID::DWELL_LVL_7 };
@@ -1151,17 +913,15 @@ void CGameState::initMapObjects()
 	for(CGObjectInstance *obj : map->objects)
 	{
 		if(obj)
-		{
-			logGlobal->trace("Calling Init for object %d, %s, %s", obj->id.getNum(), obj->typeName, obj->subTypeName);
 			obj->initObj(getRandomGenerator());
-		}
 	}
+	logGlobal->debug("\tObject initialization done");
 	for(CGObjectInstance *obj : map->objects)
 	{
 		if(!obj)
 			continue;
 
-		switch (obj->ID)
+		switch(obj->ID.toEnum())
 		{
 			case Obj::QUEST_GUARD:
 			case Obj::SEER_HUT:
@@ -1172,7 +932,7 @@ void CGameState::initMapObjects()
 			}
 		}
 	}
-	CGSubterraneanGate::postInit(); //pairing subterranean gates
+	CGSubterraneanGate::postInit(callback); //pairing subterranean gates
 
 	map->calculateGuardingGreaturePositions(); //calculate once again when all the guards are placed and initialized
 }
@@ -1366,7 +1126,7 @@ PlayerRelations CGameState::getPlayerRelations( PlayerColor color1, PlayerColor 
 
 void CGameState::apply(CPack *pack)
 {
-	ui16 typ = typeList.getTypeID(pack);
+	ui16 typ = CTypeList::getInstance().getTypeID(pack);
 	applier->getApplier(typ)->applyOnGS(this, pack);
 }
 
@@ -1444,7 +1204,7 @@ int3 CGameState::guardingCreaturePosition (int3 pos) const
 
 void CGameState::updateRumor()
 {
-	static std::vector<RumorState::ERumorType> rumorTypes = {RumorState::TYPE_MAP, RumorState::TYPE_SPECIAL, RumorState::TYPE_RAND, RumorState::TYPE_RAND};
+	static const std::vector<RumorState::ERumorType> rumorTypes = {RumorState::TYPE_MAP, RumorState::TYPE_SPECIAL, RumorState::TYPE_RAND, RumorState::TYPE_RAND};
 	std::vector<RumorState::ERumorTypeSpecial> sRumorTypes = {
 		RumorState::RUMOR_OBELISKS, RumorState::RUMOR_ARTIFACTS, RumorState::RUMOR_ARMY, RumorState::RUMOR_INCOME};
 	if(map->grailPos.valid()) // Grail should always be on map, but I had related crash I didn't manage to reproduce
@@ -1613,7 +1373,7 @@ bool CGameState::checkForVictory(const PlayerColor & player, const EventConditio
 		case EventCondition::HAVE_ARTIFACT: //check if any hero has winning artifact
 		{
 			for(const auto & elem : p->heroes)
-				if(elem->hasArt(ArtifactID(condition.objectType)))
+				if(elem->hasArt(condition.objectType.as<ArtifactID>()))
 					return true;
 			return false;
 		}
@@ -1629,7 +1389,7 @@ bool CGameState::checkForVictory(const PlayerColor & player, const EventConditio
 					&& (ai = dynamic_cast<const CArmedInstance *>(object.get()))) //contains army
 				{
 					for(const auto & elem : ai->Slots()) //iterate through army
-						if(elem.second->type->getIndex() == condition.objectType) //it's searched creature
+						if(elem.second->getId() == condition.objectType.as<CreatureID>()) //it's searched creature
 							total += elem.second->count;
 				}
 			}
@@ -1637,20 +1397,20 @@ bool CGameState::checkForVictory(const PlayerColor & player, const EventConditio
 		}
 		case EventCondition::HAVE_RESOURCES:
 		{
-			return p->resources[condition.objectType] >= condition.value;
+			return p->resources[condition.objectType.as<GameResID>()] >= condition.value;
 		}
 		case EventCondition::HAVE_BUILDING:
 		{
-			if (condition.object) // specific town
+			if (condition.objectID != ObjectInstanceID::NONE) // specific town
 			{
-				const auto * t = dynamic_cast<const CGTownInstance *>(condition.object);
-				return (t->tempOwner == player && t->hasBuilt(BuildingID(condition.objectType)));
+				const auto * t = getTown(condition.objectID);
+				return (t->tempOwner == player && t->hasBuilt(condition.objectType.as<BuildingID>()));
 			}
 			else // any town
 			{
 				for (const CGTownInstance * t : p->towns)
 				{
-					if (t->hasBuilt(BuildingID(condition.objectType)))
+					if (t->hasBuilt(condition.objectType.as<BuildingID>()))
 						return true;
 				}
 				return false;
@@ -1658,18 +1418,18 @@ bool CGameState::checkForVictory(const PlayerColor & player, const EventConditio
 		}
 		case EventCondition::DESTROY:
 		{
-			if (condition.object) // mode A - destroy specific object of this type
+			if (condition.objectID != ObjectInstanceID::NONE) // mode A - destroy specific object of this type
 			{
-				if(const auto * hero = dynamic_cast<const CGHeroInstance *>(condition.object))
+				if(const auto * hero = getHero(condition.objectID))
 					return boost::range::find(gs->map->heroesOnMap, hero) == gs->map->heroesOnMap.end();
 				else
-					return getObj(condition.object->id) == nullptr;
+					return getObj(condition.objectID) == nullptr;
 			}
 			else
 			{
 				for(const auto & elem : map->objects) // mode B - destroy all objects of this type
 				{
-					if(elem && elem->ID.getNum() == condition.objectType)
+					if(elem && elem->ID == condition.objectType.as<MapObjectID>())
 						return false;
 				}
 				return true;
@@ -1679,18 +1439,22 @@ bool CGameState::checkForVictory(const PlayerColor & player, const EventConditio
 		{
 			// list of players that need to control object to fulfull condition
 			// NOTE: cgameinfocallback specified explicitly in order to get const version
-			const auto & team = CGameInfoCallback::getPlayerTeam(player)->players;
+			const auto * team = CGameInfoCallback::getPlayerTeam(player);
 
-			if (condition.object) // mode A - flag one specific object, like town
+			if (condition.objectID != ObjectInstanceID::NONE) // mode A - flag one specific object, like town
 			{
-				return team.count(condition.object->tempOwner) != 0;
+				const auto * object = getObjInstance(condition.objectID);
+
+				if (!object)
+					return false;
+				return team->players.count(object->getOwner()) != 0;
 			}
 			else
 			{
 				for(const auto & elem : map->objects) // mode B - flag all objects of this type
 				{
 					 //check not flagged objs
-					if ( elem && elem->ID.getNum() == condition.objectType && team.count(elem->tempOwner) == 0 )
+					if ( elem && elem->ID == condition.objectType.as<MapObjectID>() && team->players.count(elem->getOwner()) == 0 )
 						return false;
 				}
 				return true;
@@ -1698,9 +1462,9 @@ bool CGameState::checkForVictory(const PlayerColor & player, const EventConditio
 		}
 		case EventCondition::TRANSPORT:
 		{
-			const auto * t = dynamic_cast<const CGTownInstance *>(condition.object);
-			return (t->visitingHero && t->visitingHero->hasArt(ArtifactID(condition.objectType))) ||
-				   (t->garrisonHero && t->garrisonHero->hasArt(ArtifactID(condition.objectType)));
+			const auto * t = getTown(condition.objectID);
+			return (t->visitingHero && t->visitingHero->hasArt(condition.objectType.as<ArtifactID>())) ||
+				   (t->garrisonHero && t->garrisonHero->hasArt(condition.objectType.as<ArtifactID>()));
 		}
 		case EventCondition::DAYS_PASSED:
 		{
@@ -1720,24 +1484,6 @@ bool CGameState::checkForVictory(const PlayerColor & player, const EventConditio
 		case EventCondition::CONST_VALUE:
 		{
 			return condition.value; // just convert to bool
-		}
-		case EventCondition::HAVE_0:
-		{
-			logGlobal->debug("Not implemented event condition type: %d", (int)condition.condition);
-			//TODO: support new condition format
-			return false;
-		}
-		case EventCondition::HAVE_BUILDING_0:
-		{
-			logGlobal->debug("Not implemented event condition type: %d", (int)condition.condition);
-			//TODO: support new condition format
-			return false;
-		}
-		case EventCondition::DESTROY_0:
-		{
-			logGlobal->debug("Not implemented event condition type: %d", (int)condition.condition);
-			//TODO: support new condition format
-			return false;
 		}
 		default:
 			logGlobal->error("Invalid event condition type: %d", (int)condition.condition);
@@ -1867,7 +1613,7 @@ struct statsHLP
 		//Heroes can produce gold as well - skill, specialty or arts
 		for(const auto & h : ps->heroes)
 		{
-			totalIncome += h->valOfBonuses(Selector::typeSubtype(BonusType::GENERATE_RESOURCE, GameResID(EGameResID::GOLD)));
+			totalIncome += h->valOfBonuses(Selector::typeSubtype(BonusType::GENERATE_RESOURCE, BonusSubtypeID(GameResID(GameResID::GOLD))));
 
 			if(!heroOrTown)
 				heroOrTown = h;
@@ -1972,10 +1718,10 @@ void CGameState::obtainPlayersStats(SThievesGuildInfo & tgi, int level)
 	}
 	if(level >= 3) //obelisks found
 	{
-		auto getObeliskVisited = [](const TeamID & t)
+		auto getObeliskVisited = [&](const TeamID & t)
 		{
-			if(CGObelisk::visited.count(t))
-				return CGObelisk::visited[t];
+			if(map->obelisksVisited.count(t))
+				return map->obelisksVisited[t];
 			else
 				return ui8(0);
 		};
@@ -2022,13 +1768,13 @@ void CGameState::obtainPlayersStats(SThievesGuildInfo & tgi, int level)
 		{
 			if(playerInactive(player.second.color)) //do nothing for neutral player
 				continue;
-			int bestCre = -1; //best creature's ID
+			CreatureID bestCre; //best creature's ID
 			for(const auto & elem : player.second.heroes)
 			{
 				for(const auto & it : elem->Slots())
 				{
-					int toCmp = it.second->type->getId(); //ID of creature we should compare with the best one
-					if(bestCre == -1 || VLC->creh->objects[bestCre]->getAIValue() < VLC->creh->objects[toCmp]->getAIValue())
+					CreatureID toCmp = it.second->type->getId(); //ID of creature we should compare with the best one
+					if(bestCre == CreatureID::NONE || bestCre.toEntity(VLC)->getAIValue() < toCmp.toEntity(VLC)->getAIValue())
 					{
 						bestCre = toCmp;
 					}
@@ -2050,12 +1796,6 @@ void CGameState::buildBonusSystemTree()
 	{
 		t->deserializationFix();
 	}
-	// CStackInstance <-> CCreature, CStackInstance <-> CArmedInstance, CArtifactInstance <-> CArtifact
-	// are provided on initializing / deserializing
-
-	// NOTE: calling deserializationFix() might be more correct option, but might lead to side effects
-	for (auto hero : map->heroesOnMap)
-		hero->boatDeserializationFix();
 }
 
 void CGameState::deserializationFix()
@@ -2093,13 +1833,12 @@ void CGameState::attachArmedObjects()
 
 bool CGameState::giveHeroArtifact(CGHeroInstance * h, const ArtifactID & aid)
 {
-	 CArtifact * const artifact = VLC->arth->objects[aid]; //pointer to constant object
-	 CArtifactInstance * ai = ArtifactUtils::createNewArtifactInstance(artifact);
+	 CArtifactInstance * ai = ArtifactUtils::createNewArtifactInstance(aid);
 	 map->addNewArtifactInstance(ai);
 	 auto slot = ArtifactUtils::getArtAnyPosition(h, aid);
 	 if(ArtifactUtils::isSlotEquipment(slot) || ArtifactUtils::isSlotBackpack(slot))
 	 {
-		 ai->putAt(ArtifactLocation(h, slot));
+		 ai->putAt(*h, slot);
 		 return true;
 	 }
 	 else
@@ -2110,14 +1849,11 @@ bool CGameState::giveHeroArtifact(CGHeroInstance * h, const ArtifactID & aid)
 
 std::set<HeroTypeID> CGameState::getUnusedAllowedHeroes(bool alsoIncludeNotAllowed) const
 {
-	std::set<HeroTypeID> ret;
-	for(int i = 0; i < map->allowedHeroes.size(); i++)
-		if(map->allowedHeroes[i] || alsoIncludeNotAllowed)
-			ret.insert(HeroTypeID(i));
+	std::set<HeroTypeID> ret = map->allowedHeroes;
 
 	for(const auto & playerSettingPair : scenarioOps->playerInfos) //remove uninitialized yet heroes picked for start by other players
 	{
-		if(playerSettingPair.second.hero.getNum() != PlayerSettings::RANDOM)
+		if(playerSettingPair.second.hero != HeroTypeID::RANDOM)
 			ret -= HeroTypeID(playerSettingPair.second.hero);
 	}
 
@@ -2126,12 +1862,15 @@ std::set<HeroTypeID> CGameState::getUnusedAllowedHeroes(bool alsoIncludeNotAllow
 		if(hero->type)
 			ret -= hero->type->getId();
 		else
-			ret -= HeroTypeID(hero->subID);
+			ret -= hero->getHeroType();
 	}
 
 	for(auto obj : map->objects) //prisons
-		if(obj && obj->ID == Obj::PRISON)
-			ret -= HeroTypeID(obj->subID);
+	{
+		auto * hero = dynamic_cast<const CGHeroInstance *>(obj.get());
+		if(hero && hero->ID == Obj::PRISON)
+			ret -= hero->getHeroType();
+	}
 
 	return ret;
 }
@@ -2143,23 +1882,19 @@ bool CGameState::isUsedHero(const HeroTypeID & hid) const
 
 CGHeroInstance * CGameState::getUsedHero(const HeroTypeID & hid) const
 {
-	for(auto hero : map->heroesOnMap)  //heroes instances initialization
-	{
-		if(hero->type && hero->type->getId() == hid)
-		{
-			return hero;
-		}
-	}
-
 	for(auto obj : map->objects) //prisons
 	{
-		if(obj && obj->ID == Obj::PRISON )
-		{
-			auto * hero = dynamic_cast<CGHeroInstance *>(obj.get());
-			assert(hero);
-			if ( hero->type && hero->type->getId() == hid )
-				return hero;
-		}
+		if (!obj)
+			continue;
+
+		if ( obj->ID !=Obj::PRISON && obj->ID != Obj::HERO)
+			continue;
+
+		auto * hero = dynamic_cast<CGHeroInstance *>(obj.get());
+		assert(hero);
+
+		if (hero->getHeroType() == hid)
+			return hero;
 	}
 
 	return nullptr;
@@ -2186,20 +1921,86 @@ bool RumorState::update(int id, int extra)
 TeamState::TeamState()
 {
 	setNodeType(TEAM);
-	fogOfWarMap = std::make_shared<boost::multi_array<ui8, 3>>();
-}
-
-TeamState::TeamState(TeamState && other) noexcept:
-	CBonusSystemNode(std::move(other)),
-	id(other.id)
-{
-	std::swap(players, other.players);
-	std::swap(fogOfWarMap, other.fogOfWarMap);
+	fogOfWarMap = std::make_unique<boost::multi_array<ui8, 3>>();
 }
 
 CRandomGenerator & CGameState::getRandomGenerator()
 {
 	return rand;
+}
+
+ArtifactID CGameState::pickRandomArtifact(CRandomGenerator & rand, int flags, std::function<bool(ArtifactID)> accepts)
+{
+	std::set<ArtifactID> potentialPicks;
+
+	// Select artifacts that satisfy provided criterias
+	for (auto const & artifactID : map->allowedArtifact)
+	{
+		if (!VLC->arth->legalArtifact(artifactID))
+			continue;
+
+		auto const * artifact = artifactID.toArtifact();
+
+		assert(artifact->aClass != CArtifact::ART_SPECIAL); // should be filtered out when allowedArtifacts is initialized
+
+		if ((flags & CArtifact::ART_TREASURE) == 0 && artifact->aClass == CArtifact::ART_TREASURE)
+			continue;
+
+		if ((flags & CArtifact::ART_MINOR) == 0 && artifact->aClass == CArtifact::ART_MINOR)
+			continue;
+
+		if ((flags & CArtifact::ART_MAJOR) == 0 && artifact->aClass == CArtifact::ART_MAJOR)
+			continue;
+
+		if ((flags & CArtifact::ART_RELIC) == 0 && artifact->aClass == CArtifact::ART_RELIC)
+			continue;
+
+		if (!accepts(artifact->getId()))
+			continue;
+
+		potentialPicks.insert(artifact->getId());
+	}
+
+	return pickRandomArtifact(rand, potentialPicks);
+}
+
+ArtifactID CGameState::pickRandomArtifact(CRandomGenerator & rand, std::set<ArtifactID> potentialPicks)
+{
+	// No allowed artifacts at all - give Grail - this can't be banned (hopefully)
+	// FIXME: investigate how such cases are handled by H3 - some heavily customized user-made maps likely rely on H3 behavior
+	if (potentialPicks.empty())
+	{
+		logGlobal->warn("Failed to find artifact that matches requested parameters!");
+		return ArtifactID::GRAIL;
+	}
+
+	// Find how many times least used artifacts were picked by randomizer
+	int leastUsedTimes = std::numeric_limits<int>::max();
+	for (auto const & artifact : potentialPicks)
+		if (allocatedArtifacts[artifact] < leastUsedTimes)
+			leastUsedTimes = allocatedArtifacts[artifact];
+
+	// Pick all artifacts that were used least number of times
+	std::set<ArtifactID> preferredPicks;
+	for (auto const & artifact : potentialPicks)
+		if (allocatedArtifacts[artifact] == leastUsedTimes)
+			preferredPicks.insert(artifact);
+
+	assert(!preferredPicks.empty());
+
+	ArtifactID artID = *RandomGeneratorUtil::nextItem(preferredPicks, rand);
+	allocatedArtifacts[artID] += 1; // record +1 more usage
+	return artID;
+}
+
+ArtifactID CGameState::pickRandomArtifact(CRandomGenerator & rand, std::function<bool(ArtifactID)> accepts)
+{
+	return pickRandomArtifact(rand, 0xff, std::move(accepts));
+}
+
+ArtifactID CGameState::pickRandomArtifact(CRandomGenerator & rand, int flags)
+{
+	return pickRandomArtifact(rand, flags, [](const ArtifactID &) { return true; });
 }
 
 VCMI_LIB_NAMESPACE_END

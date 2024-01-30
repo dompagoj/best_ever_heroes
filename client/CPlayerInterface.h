@@ -76,7 +76,6 @@ public: // TODO: make private
 	//minor interfaces
 	CondSh<bool> *showingDialog; //indicates if dialog box is displayed
 
-	static boost::recursive_mutex *pim;
 	bool makingTurn; //if player is already making his turn
 
 	CCastleInterface * castleInt; //nullptr if castle window isn't opened
@@ -88,6 +87,7 @@ public: // TODO: make private
 	//During battle is quick combat mode is used
 	std::shared_ptr<CBattleGameInterface> autofightingAI; //AI that makes decisions
 	bool isAutoFightOn; //Flag, switch it to stop quick combat. Don't touch if there is no battle interface.
+	bool isAutoFightEndBattle; //Flag, if battle forced to end with autocombat
 
 protected: // Call-ins from server, should not be called directly, but only via GameInterface
 
@@ -118,13 +118,13 @@ protected: // Call-ins from server, should not be called directly, but only via 
 	void heroVisitsTown(const CGHeroInstance* hero, const CGTownInstance * town) override;
 	void receivedResource() override;
 	void showInfoDialog(EInfoWindowMode type, const std::string & text, const std::vector<Component> & components, int soundID) override;
-	void showRecruitmentDialog(const CGDwelling *dwelling, const CArmedInstance *dst, int level) override;
+	void showRecruitmentDialog(const CGDwelling *dwelling, const CArmedInstance *dst, int level, QueryID queryID) override;
 	void showBlockingDialog(const std::string &text, const std::vector<Component> &components, QueryID askID, const int soundID, bool selection, bool cancel) override; //Show a dialog, player must take decision. If selection then he has to choose between one of given components, if cancel he is allowed to not choose. After making choice, CCallback::selectionMade should be called with number of selected component (1 - n) or 0 for cancel (if allowed) and askID.
 	void showTeleportDialog(const CGHeroInstance * hero, TeleportChannelID channel, TTeleportExitsList exits, bool impassable, QueryID askID) override;
 	void showGarrisonDialog(const CArmedInstance *up, const CGHeroInstance *down, bool removableUnits, QueryID queryID) override;
 	void showMapObjectSelectDialog(QueryID askID, const Component & icon, const MetaString & title, const MetaString & description, const std::vector<ObjectInstanceID> & objects) override;
-	void showMarketWindow(const IMarket *market, const CGHeroInstance *visitor) override;
-	void showUniversityWindow(const IMarket *market, const CGHeroInstance *visitor) override;
+	void showMarketWindow(const IMarket *market, const CGHeroInstance *visitor, QueryID queryID) override;
+	void showUniversityWindow(const IMarket *market, const CGHeroInstance *visitor, QueryID queryID) override;
 	void showHillFortWindow(const CGObjectInstance *object, const CGHeroInstance *visitor) override;
 	void advmapSpellCast(const CGHeroInstance * caster, SpellID spellID) override; //called when a hero casts a spell
 	void tileHidden(const std::unordered_set<int3> &pos) override; //called when given tiles become hidden under fog of war
@@ -146,8 +146,8 @@ protected: // Call-ins from server, should not be called directly, but only via 
 	void gameOver(PlayerColor player, const EVictoryLossCheckResult & victoryLossCheckResult) override;
 	void playerStartsTurn(PlayerColor player) override; //called before yourTurn on active itnerface
 	void playerEndsTurn(PlayerColor player) override;
-	void saveGame(BinarySerializer & h, const int version) override; //saving
-	void loadGame(BinaryDeserializer & h, const int version) override; //loading
+	void saveGame(BinarySerializer & h) override; //saving
+	void loadGame(BinaryDeserializer & h) override; //loading
 	void showWorldViewEx(const std::vector<ObjectPosInfo> & objectPositions, bool showTerrain) override;
 
 	//for battles
@@ -180,13 +180,13 @@ public: // public interface for use by client via LOCPLINT access
 	void viewWorldMap() override;
 	void showQuestLog() override;
 	void showThievesGuildWindow (const CGObjectInstance * obj) override;
-	void showTavernWindow(const CGObjectInstance *townOrTavern) override;
+	void showTavernWindow(const CGObjectInstance * object, const CGHeroInstance * visitor, QueryID queryID) override;
 	void showShipyardDialog(const IShipyard *obj) override; //obj may be town or shipyard;
 
 	void showHeroExchange(ObjectInstanceID hero1, ObjectInstanceID hero2);
 	void showArtifactAssemblyDialog(const Artifact * artifact, const Artifact * assembledArtifact, CFunctionList<void()> onYes);
-	void waitWhileDialog(bool unlockPim = true);
-	void waitForAllDialogs(bool unlockPim = true);
+	void waitWhileDialog();
+	void waitForAllDialogs();
 	void openTownWindow(const CGTownInstance * town); //shows townscreen
 	void openHeroWindow(const CGHeroInstance * hero); //shows hero window with given hero
 
@@ -201,6 +201,7 @@ public: // public interface for use by client via LOCPLINT access
 	void showShipyardDialogOrProblemPopup(const IShipyard *obj); //obj may be town or shipyard;
 	void proposeLoadingGame();
 	void performAutosave();
+	void gamePause(bool pause);
 
 	///returns true if all events are processed internally
 	bool capturedAllEvents();
@@ -223,7 +224,7 @@ private:
 	};
 
 	void heroKilled(const CGHeroInstance* hero);
-	void garrisonsChanged(std::vector<const CGObjectInstance *> objs);
+	void garrisonsChanged(std::vector<const CArmedInstance *> objs);
 	void requestReturningToMainMenu(bool won);
 	void acceptTurn(QueryID queryID); //used during hot seat after your turn message is close
 	void initializeHeroTownList();

@@ -9,9 +9,10 @@
  */
 
 #include "StdInc.h"
-#include <stack>
-#include "../CRandomGenerator.h"
 #include "CZonePlacer.h"
+
+#include "../CRandomGenerator.h"
+#include "../CTownHandler.h"
 #include "../TerrainHandler.h"
 #include "../mapping/CMap.h"
 #include "../mapping/CMapEditManager.h"
@@ -108,7 +109,8 @@ void CZonePlacer::placeOnGrid(CRandomGenerator* rand)
 	//Place first zone
 
 	auto firstZone = zonesVector[0].second;
-	size_t x = 0, y = 0;
+	size_t x = 0;
+	size_t y = 0;
 
 	auto getRandomEdge = [rand, gridSize](size_t& x, size_t& y)
 	{
@@ -401,7 +403,7 @@ void CZonePlacer::placeZones(CRandomGenerator * rand)
 			//TODO: Don't do this is fitness was improved
 			moveOneZone(zones, totalForces, distances, overlaps);
 
-			improved |= evaluateSolution();;
+			improved |= evaluateSolution();
 		}
 
 		if (!improved)
@@ -442,11 +444,15 @@ void CZonePlacer::prepareZones(TZoneMap &zones, TZoneVector &zonesVector, const 
 			{
 				auto player = PlayerColor(*owner - 1);
 				auto playerSettings = map.getMapGenOptions().getPlayersSettings();
-				si32 faction = FactionID::RANDOM;
+				FactionID faction = FactionID::RANDOM;
 				if (vstd::contains(playerSettings, player))
+				{
 					faction = playerSettings[player].getStartingTown();
+				}
 				else
-					logGlobal->error("Can't find info for player %d (starting zone)", player.getNum());
+				{
+					logGlobal->trace("Player %d (starting zone %d) does not participate in game", player.getNum(), zone.first);
+				}
 
 				if (faction == FactionID::RANDOM) //TODO: check this after a town has already been randomized
 					zonesToPlace.push_back(zone);

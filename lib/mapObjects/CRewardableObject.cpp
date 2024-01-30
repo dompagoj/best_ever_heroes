@@ -14,19 +14,13 @@
 #include "../CGeneralTextHandler.h"
 #include "../CPlayerState.h"
 #include "../IGameCallback.h"
-#include "../NetPacks.h"
 #include "../mapObjectConstructors/AObjectTypeHandler.h"
 #include "../mapObjectConstructors/CObjectClassesHandler.h"
+#include "../mapObjects/CGHeroInstance.h"
+#include "../networkPacks/PacksForClient.h"
 #include "../serializer/JsonSerializeFormat.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
-
-// FIXME: copy-pasted from CObjectHandler
-static std::string visitedTxt(const bool visited)
-{
-	int id = visited ? 352 : 353;
-	return VLC->generaltexth->allTexts[id];
-}
 
 void CRewardableObject::grantRewardWithMessage(const CGHeroInstance * contextHero, int index, bool markAsVisit) const
 {
@@ -54,15 +48,28 @@ void CRewardableObject::selectRewardWthMessage(const CGHeroInstance * contextHer
 	BlockingDialog sd(configuration.canRefuse, rewardIndices.size() > 1);
 	sd.player = contextHero->tempOwner;
 	sd.text = dialog;
-
-	if (rewardIndices.size() > 1)
-		for (auto index : rewardIndices)
-			sd.components.push_back(configuration.info.at(index).reward.getDisplayedComponent(contextHero));
-
-	if (rewardIndices.size() == 1)
-		configuration.info.at(rewardIndices.front()).reward.loadComponents(sd.components, contextHero);
-
+	sd.components = loadComponents(contextHero, rewardIndices);
 	cb->showBlockingDialog(&sd);
+}
+
+std::vector<Component> CRewardableObject::loadComponents(const CGHeroInstance * contextHero, const std::vector<ui32> & rewardIndices) const
+{
+	std::vector<Component> result;
+
+	if (rewardIndices.empty())
+		return result;
+
+	if (configuration.selectMode != Rewardable::SELECT_FIRST && rewardIndices.size() > 1)
+	{
+		for (auto index : rewardIndices)
+			result.push_back(configuration.info.at(index).reward.getDisplayedComponent(contextHero));
+	}
+	else
+	{
+		configuration.info.at(rewardIndices.front()).reward.loadComponents(result, contextHero);
+	}
+
+	return result;
 }
 
 void CRewardableObject::onHeroVisit(const CGHeroInstance *h) const
@@ -104,11 +111,20 @@ void CRewardableObject::onHeroVisit(const CGHeroInstance *h) const
 						selectRewardWthMessage(h, rewards, configuration.onSelect);
 						break;
 					case Rewardable::SELECT_FIRST: // give first available
-						grantRewardWithMessage(h, rewards.front(), true);
+						if (configuration.canRefuse)
+							selectRewardWthMessage(h, { rewards.front() }, configuration.info.at(rewards.front()).message);
+						else
+							grantRewardWithMessage(h, rewards.front(), true);
 						break;
 					case Rewardable::SELECT_RANDOM: // give random
-						grantRewardWithMessage(h, *RandomGeneratorUtil::nextItem(rewards, cb->gameState()->getRandomGenerator()), true);
+					{
+						ui32 rewardIndex = *RandomGeneratorUtil::nextItem(rewards, cb->gameState()->getRandomGenerator());
+						if (configuration.canRefuse)
+							selectRewardWthMessage(h, { rewardIndex }, configuration.info.at(rewardIndex).message);
+						else
+							grantRewardWithMessage(h, rewardIndex, true);
 						break;
+					}
 				}
 				break;
 			}
@@ -123,6 +139,12 @@ void CRewardableObject::onHeroVisit(const CGHeroInstance *h) const
 	else
 	{
 		logGlobal->debug("Revisiting already visited object");
+
+		if (!wasVisited(h->getOwner()))
+		{
+			ChangeObjectVisitors cov(ChangeObjectVisitors::VISITOR_ADD_TEAM, id, h->id);
+			cb->sendAndApply(&cov);
+		}
 
 		auto visitedRewards = getAvailableRewards(h, Rewardable::EEventType::EVENT_ALREADY_VISITED);
 		if (!visitedRewards.empty())
@@ -156,7 +178,7 @@ void CRewardableObject::blockingDialogAnswered(const CGHeroInstance *hero, ui32 
 
 void CRewardableObject::markAsVisited(const CGHeroInstance * hero) const
 {
-	cb->setObjProperty(id, ObjProperty::REWARD_CLEARED, true);
+	cb->setObjPropertyValue(id, ObjProperty::REWARD_CLEARED, true);
 
 	ChangeObjectVisitors cov(ChangeObjectVisitors::VISITOR_ADD, id, hero->id);
 	cb->sendAndApply(&cov);
@@ -164,7 +186,7 @@ void CRewardableObject::markAsVisited(const CGHeroInstance * hero) const
 
 void CRewardableObject::grantReward(ui32 rewardID, const CGHeroInstance * hero) const
 {
-	cb->setObjProperty(id, ObjProperty::REWARD_SELECT, rewardID);
+	cb->setObjPropertyValue(id, ObjProperty::REWARD_SELECT, rewardID);
 	grantRewardBeforeLevelup(cb, configuration.info.at(rewardID), hero);
 	
 	// hero is not blocked by levelup dialog - grant remainer immediately
@@ -185,9 +207,11 @@ bool CRewardableObject::wasVisitedBefore(const CGHeroInstance * contextHero) con
 		case Rewardable::VISIT_PLAYER:
 			return vstd::contains(cb->getPlayerState(contextHero->getOwner())->visitedObjects, ObjectInstanceID(id));
 		case Rewardable::VISIT_BONUS:
-			return contextHero->hasBonusFrom(BonusSource::OBJECT, ID);
+			return contextHero->hasBonusFrom(BonusSource::OBJECT_TYPE, BonusSourceID(ID));
 		case Rewardable::VISIT_HERO:
 			return contextHero->visitedObjects.count(ObjectInstanceID(id));
+		case Rewardable::VISIT_LIMITER:
+			return configuration.visitLimiter.heroAllowed(contextHero);
 		default:
 			return false;
 	}
@@ -200,6 +224,7 @@ bool CRewardableObject::wasVisited(PlayerColor player) const
 		case Rewardable::VISIT_UNLIMITED:
 		case Rewardable::VISIT_BONUS:
 		case Rewardable::VISIT_HERO:
+		case Rewardable::VISIT_LIMITER:
 			return false;
 		case Rewardable::VISIT_ONCE:
 		case Rewardable::VISIT_PLAYER:
@@ -209,34 +234,120 @@ bool CRewardableObject::wasVisited(PlayerColor player) const
 	}
 }
 
+bool CRewardableObject::wasScouted(PlayerColor player) const
+{
+	return vstd::contains(cb->getPlayerState(player)->visitedObjects, ObjectInstanceID(id));
+}
+
 bool CRewardableObject::wasVisited(const CGHeroInstance * h) const
 {
 	switch (configuration.visitMode)
 	{
 		case Rewardable::VISIT_BONUS:
-			return h->hasBonusFrom(BonusSource::OBJECT, ID);
+			return h->hasBonusFrom(BonusSource::OBJECT_TYPE, BonusSourceID(ID));
 		case Rewardable::VISIT_HERO:
 			return h->visitedObjects.count(ObjectInstanceID(id));
+		case Rewardable::VISIT_LIMITER:
+			return wasScouted(h->getOwner()) && configuration.visitLimiter.heroAllowed(h);
 		default:
-			return wasVisited(h->tempOwner);
+			return wasVisited(h->getOwner());
 	}
+}
+
+std::string CRewardableObject::getDisplayTextImpl(PlayerColor player, const CGHeroInstance * hero, bool includeDescription) const
+{
+	std::string result = getObjectName();
+
+	if (includeDescription && !getDescriptionMessage(player, hero).empty())
+		result += "\n" + getDescriptionMessage(player, hero);
+
+	if (hero)
+	{
+		if(configuration.visitMode != Rewardable::VISIT_UNLIMITED)
+		{
+			if (wasVisited(hero))
+				result += "\n" + configuration.visitedTooltip.toString();
+			else
+				result += "\n " + configuration.notVisitedTooltip.toString();
+		}
+	}
+	else
+	{
+		if(configuration.visitMode == Rewardable::VISIT_PLAYER || configuration.visitMode == Rewardable::VISIT_ONCE)
+		{
+			if (wasVisited(player))
+				result += "\n" + configuration.visitedTooltip.toString();
+			else
+				result += "\n" + configuration.notVisitedTooltip.toString();
+		}
+	}
+	return result;
 }
 
 std::string CRewardableObject::getHoverText(PlayerColor player) const
 {
-	if(configuration.visitMode == Rewardable::VISIT_PLAYER || configuration.visitMode == Rewardable::VISIT_ONCE)
-		return getObjectName() + " " + visitedTxt(wasVisited(player));
-	return getObjectName();
+	return getDisplayTextImpl(player, nullptr, false);
 }
 
 std::string CRewardableObject::getHoverText(const CGHeroInstance * hero) const
 {
-	if(configuration.visitMode != Rewardable::VISIT_UNLIMITED)
-		return getObjectName() + " " + visitedTxt(wasVisited(hero));
-	return getObjectName();
+	return getDisplayTextImpl(hero->getOwner(), hero, false);
 }
 
-void CRewardableObject::setPropertyDer(ui8 what, ui32 val)
+std::string CRewardableObject::getPopupText(PlayerColor player) const
+{
+	return getDisplayTextImpl(player, nullptr, true);
+}
+
+std::string CRewardableObject::getPopupText(const CGHeroInstance * hero) const
+{
+	return getDisplayTextImpl(hero->getOwner(), hero, true);
+}
+
+std::string CRewardableObject::getDescriptionMessage(PlayerColor player, const CGHeroInstance * hero) const
+{
+	if (!wasScouted(player) || configuration.info.empty())
+		return configuration.description.toString();
+
+	auto rewardIndices = getAvailableRewards(hero, Rewardable::EEventType::EVENT_FIRST_VISIT);
+	if (rewardIndices.empty() || !configuration.info[0].description.empty())
+		return configuration.info[0].description.toString();
+
+	if (!configuration.info[rewardIndices.front()].description.empty())
+		return configuration.info[rewardIndices.front()].description.toString();
+
+	return configuration.description.toString();
+}
+
+std::vector<Component> CRewardableObject::getPopupComponentsImpl(PlayerColor player, const CGHeroInstance * hero) const
+{
+	if (!wasScouted(player))
+		return {};
+
+	if (!configuration.showScoutedPreview)
+		return {};
+
+	auto rewardIndices = getAvailableRewards(hero, Rewardable::EEventType::EVENT_FIRST_VISIT);
+	if (rewardIndices.empty() && !configuration.info.empty())
+		rewardIndices.push_back(0);
+
+	if (rewardIndices.empty())
+		return {};
+
+	return loadComponents(hero, rewardIndices);
+}
+
+std::vector<Component> CRewardableObject::getPopupComponents(PlayerColor player) const
+{
+	return getPopupComponentsImpl(player, nullptr);
+}
+
+std::vector<Component> CRewardableObject::getPopupComponents(const CGHeroInstance * hero) const
+{
+	return getPopupComponentsImpl(hero->getOwner(), hero);
+}
+
+void CRewardableObject::setPropertyDer(ObjProperty what, ObjPropertyID identifier)
 {
 	switch (what)
 	{
@@ -244,10 +355,10 @@ void CRewardableObject::setPropertyDer(ui8 what, ui32 val)
 			initObj(cb->gameState()->getRandomGenerator());
 			break;
 		case ObjProperty::REWARD_SELECT:
-			selectedReward = val;
+			selectedReward = identifier.getNum();
 			break;
 		case ObjProperty::REWARD_CLEARED:
-			onceVisitableObjectCleared = val;
+			onceVisitableObjectCleared = identifier.getNum();
 			break;
 	}
 }
@@ -258,11 +369,11 @@ void CRewardableObject::newTurn(CRandomGenerator & rand) const
 	{
 		if (configuration.resetParameters.rewards)
 		{
-			cb->setObjProperty(id, ObjProperty::REWARD_RANDOMIZE, 0);
+			cb->setObjPropertyValue(id, ObjProperty::REWARD_RANDOMIZE, 0);
 		}
 		if (configuration.resetParameters.visitors)
 		{
-			cb->setObjProperty(id, ObjProperty::REWARD_CLEARED, false);
+			cb->setObjPropertyValue(id, ObjProperty::REWARD_CLEARED, false);
 			ChangeObjectVisitors cov(ChangeObjectVisitors::VISITOR_CLEAR, id);
 			cb->sendAndApply(&cov);
 		}
@@ -271,10 +382,11 @@ void CRewardableObject::newTurn(CRandomGenerator & rand) const
 
 void CRewardableObject::initObj(CRandomGenerator & rand)
 {
-	VLC->objtypeh->getHandlerFor(ID, subID)->configureObject(this, rand);
+	getObjectHandler()->configureObject(this, rand);
 }
 
-CRewardableObject::CRewardableObject()
+CRewardableObject::CRewardableObject(IGameCallback *cb)
+	:CArmedInstance(cb)
 {}
 
 void CRewardableObject::serializeJsonOptions(JsonSerializeFormat & handler)

@@ -17,6 +17,7 @@ VCMI_LIB_NAMESPACE_BEGIN
 
 class CGHeroInstance;
 class MapReaderH3M;
+class MetaString;
 class CArtifactInstance;
 class CGObjectInstance;
 class CGSeerHut;
@@ -54,7 +55,7 @@ public:
 	 *
 	 * @return a unique ptr of the loaded map class
 	 */
-	std::unique_ptr<CMap> loadMap() override;
+	std::unique_ptr<CMap> loadMap(IGameCallback * cb) override;
 
 	/**
 	 * Loads the VCMI/H3 map header.
@@ -164,8 +165,8 @@ private:
 	CGObjectInstance * readSeerHut(const int3 & initialPos, const ObjectInstanceID & idToBeGiven);
 	CGObjectInstance * readTown(const int3 & position, std::shared_ptr<const ObjectTemplate> objTempl);
 	CGObjectInstance * readSign(const int3 & position);
-	CGObjectInstance * readWitchHut();
-	CGObjectInstance * readScholar();
+	CGObjectInstance * readWitchHut(const int3 & position, std::shared_ptr<const ObjectTemplate> objectTemplate);
+	CGObjectInstance * readScholar(const int3 & position, std::shared_ptr<const ObjectTemplate> objectTemplate);
 	CGObjectInstance * readGarrison(const int3 & mapPosition);
 	CGObjectInstance * readArtifact(const int3 & position, std::shared_ptr<const ObjectTemplate> objTempl);
 	CGObjectInstance * readResource(const int3 & position, std::shared_ptr<const ObjectTemplate> objTempl);
@@ -173,7 +174,7 @@ private:
 	CGObjectInstance * readPandora(const int3 & position, const ObjectInstanceID & idToBeGiven);
 	CGObjectInstance * readDwelling(const int3 & position);
 	CGObjectInstance * readDwellingRandom(const int3 & position, std::shared_ptr<const ObjectTemplate> objTempl);
-	CGObjectInstance * readShrine();
+	CGObjectInstance * readShrine(const int3 & position, std::shared_ptr<const ObjectTemplate> objectTemplate);
 	CGObjectInstance * readHeroPlaceholder(const int3 & position);
 	CGObjectInstance * readGrail(const int3 & position, std::shared_ptr<const ObjectTemplate> objectTemplate);
 	CGObjectInstance * readPyramid(const int3 & position, std::shared_ptr<const ObjectTemplate> objTempl);
@@ -203,7 +204,7 @@ private:
 	 *
 	 * @param guard the quest guard where that quest should be applied to
 	 */
-	void readQuest(IQuestObject * guard, const int3 & position);
+	int readQuest(IQuestObject * guard, const int3 & position);
 
 	void readSeerHutQuest(CGSeerHut * hut, const int3 & position, const ObjectInstanceID & idToBeGiven);
 
@@ -215,7 +216,7 @@ private:
 	/**
 	* read optional message and optional guards
 	*/
-	void readMessageAndGuards(std::string & message, CCreatureSet * guards, const int3 & position);
+	void readMessageAndGuards(MetaString & message, CCreatureSet * guards, const int3 & position);
 
 	/// reads string from input stream and converts it to unicode
 	std::string readBasicString();

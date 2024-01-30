@@ -48,7 +48,7 @@ PlayerParams::PlayerParams(MapController & ctrl, int playerId, QWidget *parent) 
 	//load factions
 	for(auto idx : VLC->townh->getAllowedFactions())
 	{
-		CFaction * faction = VLC->townh->objects.at(idx);
+		const CFaction * faction = VLC->townh->objects.at(idx);
 		auto * item = new QListWidgetItem(QString::fromStdString(faction->getNameTranslated()));
 		item->setData(Qt::UserRole, QVariant::fromValue(idx.getNum()));
 		item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
@@ -172,7 +172,7 @@ void PlayerParams::on_mainTown_currentIndexChanged(int index)
 
 void PlayerParams::on_teamId_activated(int index)
 {
-	playerInfo.team = ui->teamId->currentData().toInt();
+	playerInfo.team.setNum(ui->teamId->currentData().toInt());
 }
 
 

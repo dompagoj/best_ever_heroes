@@ -13,34 +13,35 @@
 #include "CHeroHandler.h" // for CHeroHandler
 #include "spells/CSpellHandler.h"// for CSpell
 #include "CSkillHandler.h"// for CSkill
-#include "NetPacks.h"
 #include "CBonusTypeHandler.h"
 #include "BattleFieldHandler.h"
 #include "ObstacleHandler.h"
-#include "bonuses/CBonusSystemNode.h"
 #include "bonuses/Limiters.h"
 #include "bonuses/Propagators.h"
 #include "bonuses/Updaters.h"
 
-#include "serializer/CSerializer.h" // for SAVEGAME_MAGIC
-#include "serializer/BinaryDeserializer.h"
-#include "serializer/BinarySerializer.h"
-#include "serializer/CLoadIntegrityValidator.h"
+#include "serializer/CLoadFile.h"
+#include "serializer/CSaveFile.h"
 #include "rmg/CMapGenOptions.h"
 #include "mapObjectConstructors/AObjectTypeHandler.h"
 #include "mapObjectConstructors/CObjectClassesHandler.h"
+#include "mapObjects/CGTownInstance.h"
 #include "mapObjects/CObjectHandler.h"
+#include "mapObjects/CQuest.h"
+#include "mapObjects/MiscObjects.h"
 #include "mapObjects/ObjectTemplate.h"
 #include "campaign/CampaignState.h"
 #include "StartInfo.h"
 #include "gameState/CGameState.h"
 #include "gameState/CGameStateCampaign.h"
 #include "gameState/TavernHeroesPool.h"
+#include "gameState/QuestInfo.h"
 #include "mapping/CMap.h"
 #include "modding/CModHandler.h"
 #include "modding/CModInfo.h"
 #include "modding/IdentifierStorage.h"
 #include "modding/CModVersion.h"
+#include "modding/ActiveModsInSaveList.h"
 #include "CPlayerState.h"
 #include "GameSettings.h"
 #include "ScriptHandler.h"
@@ -78,8 +79,8 @@ void CPrivilegedInfoCallback::getFreeTiles(std::vector<int3> & tiles) const
 void CPrivilegedInfoCallback::getTilesInRange(std::unordered_set<int3> & tiles,
 											  const int3 & pos,
 											  int radious,
+											  ETileVisibility mode,
 											  std::optional<PlayerColor> player,
-											  int mode,
 											  int3::EDistanceFormula distanceFormula) const
 {
 	if(!!player && !player->isValidPlayer())
@@ -88,7 +89,7 @@ void CPrivilegedInfoCallback::getTilesInRange(std::unordered_set<int3> & tiles,
 		return;
 	}
 	if(radious == CBuilding::HEIGHT_SKYSHIP) //reveal entire map
-		getAllTiles (tiles, player, -1, MapTerrainFilterMode::NONE);
+		getAllTiles (tiles, player, -1, [](auto * tile){return true;});
 	else
 	{
 		const TeamState * team = !player ? nullptr : gs->getPlayerTeam(*player);
@@ -97,13 +98,13 @@ void CPrivilegedInfoCallback::getTilesInRange(std::unordered_set<int3> & tiles,
 			for (int yd = std::max<int>(pos.y - radious, 0); yd <= std::min<int>(pos.y + radious, gs->map->height - 1); yd++)
 			{
 				int3 tilePos(xd,yd,pos.z);
-				double distance = pos.dist(tilePos, distanceFormula);
+				int distance = pos.dist(tilePos, distanceFormula);
 
 				if(distance <= radious)
 				{
 					if(!player
-						|| (mode == 1  && (*team->fogOfWarMap)[pos.z][xd][yd] == 0)
-						|| (mode == -1 && (*team->fogOfWarMap)[pos.z][xd][yd] == 1)
+						|| (mode == ETileVisibility::HIDDEN  && (*team->fogOfWarMap)[pos.z][xd][yd] == 0)
+						|| (mode == ETileVisibility::REVEALED && (*team->fogOfWarMap)[pos.z][xd][yd] == 1)
 					)
 						tiles.insert(int3(xd,yd,pos.z));
 				}
@@ -112,7 +113,7 @@ void CPrivilegedInfoCallback::getTilesInRange(std::unordered_set<int3> & tiles,
 	}
 }
 
-void CPrivilegedInfoCallback::getAllTiles(std::unordered_set<int3> & tiles, std::optional<PlayerColor> Player, int level, MapTerrainFilterMode tileFilterMode) const
+void CPrivilegedInfoCallback::getAllTiles(std::unordered_set<int3> & tiles, std::optional<PlayerColor> Player, int level, std::function<bool(const TerrainTile *)> filter) const
 {
 	if(!!Player && !Player->isValidPlayer())
 	{
@@ -137,42 +138,22 @@ void CPrivilegedInfoCallback::getAllTiles(std::unordered_set<int3> & tiles, std:
 		{
 			for(int yd = 0; yd < gs->map->height; yd++)
 			{
-				bool isTileEligible = false;
-
-				switch(tileFilterMode)
-				{
-					case MapTerrainFilterMode::NONE:
-						isTileEligible = true;
-						break;
-					case MapTerrainFilterMode::WATER:
-						isTileEligible = getTile(int3(xd, yd, zd))->terType->isWater();
-						break;
-					case MapTerrainFilterMode::LAND:
-						isTileEligible = getTile(int3(xd, yd, zd))->terType->isLand();
-						break;
-					case MapTerrainFilterMode::LAND_CARTOGRAPHER:
-						isTileEligible = getTile(int3(xd, yd, zd))->terType->isSurfaceCartographerCompatible();
-						break;
-					case MapTerrainFilterMode::UNDERGROUND_CARTOGRAPHER:
-						isTileEligible = getTile(int3(xd, yd, zd))->terType->isUndergroundCartographerCompatible();
-						break;
-				}
-
-				if(isTileEligible)
-					tiles.insert(int3(xd, yd, zd));
+				int3 coordinates(xd, yd, zd);
+				if (filter(getTile(coordinates)))
+					tiles.insert(coordinates);
 			}
 		}
 	}
 }
 
-void CPrivilegedInfoCallback::pickAllowedArtsSet(std::vector<const CArtifact *> & out, CRandomGenerator & rand) const
+void CPrivilegedInfoCallback::pickAllowedArtsSet(std::vector<const CArtifact *> & out, CRandomGenerator & rand)
 {
 	for (int j = 0; j < 3 ; j++)
-		out.push_back(VLC->arth->objects[VLC->arth->pickRandomArtifact(rand, CArtifact::ART_TREASURE)]);
+		out.push_back(gameState()->pickRandomArtifact(rand, CArtifact::ART_TREASURE).toArtifact());
 	for (int j = 0; j < 3 ; j++)
-		out.push_back(VLC->arth->objects[VLC->arth->pickRandomArtifact(rand, CArtifact::ART_MINOR)]);
+		out.push_back(gameState()->pickRandomArtifact(rand, CArtifact::ART_MINOR).toArtifact());
 
-	out.push_back(VLC->arth->objects[VLC->arth->pickRandomArtifact(rand, CArtifact::ART_MAJOR)]);
+	out.push_back(gameState()->pickRandomArtifact(rand, CArtifact::ART_MAJOR).toArtifact());
 }
 
 void CPrivilegedInfoCallback::getAllowedSpells(std::vector<SpellID> & out, std::optional<ui16> level)
@@ -181,7 +162,7 @@ void CPrivilegedInfoCallback::getAllowedSpells(std::vector<SpellID> & out, std::
 	{
 		const spells::Spell * spell = SpellID(i).toSpell();
 
-		if (!isAllowed(0, spell->getIndex()))
+		if (!isAllowed(spell->getId()))
 			continue;
 
 		if (level.has_value() && spell->getLevel() != level)
@@ -204,6 +185,7 @@ void CPrivilegedInfoCallback::loadCommonState(Loader & in)
 
 	CMapHeader dum;
 	StartInfo * si = nullptr;
+	ActiveModsInSaveList activeMods;
 
 	logGlobal->info("\tReading header");
 	in.serializer & dum;
@@ -211,8 +193,8 @@ void CPrivilegedInfoCallback::loadCommonState(Loader & in)
 	logGlobal->info("\tReading options");
 	in.serializer & si;
 
-	logGlobal->info("\tReading handlers");
-	in.serializer & *VLC;
+	logGlobal->info("\tReading mod list");
+	in.serializer & activeMods;
 
 	logGlobal->info("\tReading gamestate");
 	in.serializer & gs;
@@ -221,20 +203,21 @@ void CPrivilegedInfoCallback::loadCommonState(Loader & in)
 template<typename Saver>
 void CPrivilegedInfoCallback::saveCommonState(Saver & out) const
 {
+	ActiveModsInSaveList activeMods;
+
 	logGlobal->info("Saving lib part of game...");
 	out.putMagicBytes(SAVEGAME_MAGIC);
 	logGlobal->info("\tSaving header");
 	out.serializer & static_cast<CMapHeader&>(*gs->map);
 	logGlobal->info("\tSaving options");
 	out.serializer & gs->scenarioOps;
-	logGlobal->info("\tSaving handlers");
-	out.serializer & *VLC;
+	logGlobal->info("\tSaving mod list");
+	out.serializer & activeMods;
 	logGlobal->info("\tSaving gamestate");
 	out.serializer & gs;
 }
 
 // hardly memory usage for `-gdwarf-4` flag
-template DLL_LINKAGE void CPrivilegedInfoCallback::loadCommonState<CLoadIntegrityValidator>(CLoadIntegrityValidator &);
 template DLL_LINKAGE void CPrivilegedInfoCallback::loadCommonState<CLoadFile>(CLoadFile &);
 template DLL_LINKAGE void CPrivilegedInfoCallback::saveCommonState<CSaveFile>(CSaveFile &) const;
 

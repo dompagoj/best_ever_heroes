@@ -14,12 +14,14 @@
 
 #include "CSpellHandler.h"
 
+#include "../CGameInfoCallback.h"
+#include "../CPlayerState.h"
 #include "../CRandomGenerator.h"
 #include "../mapObjects/CGHeroInstance.h"
-#include "../NetPacks.h"
-#include "../CGameInfoCallback.h"
+#include "../mapObjects/CGTownInstance.h"
+#include "../mapObjects/MiscObjects.h"
 #include "../mapping/CMap.h"
-#include "../CPlayerState.h"
+#include "../networkPacks/PacksForClient.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -83,7 +85,7 @@ ESpellCastResult AdventureSpellMechanics::applyAdventureEffects(SpellCastEnviron
 		for(const Bonus & b : bonuses)
 		{
 			GiveBonus gb;
-			gb.id = parameters.caster->getCasterUnitId();
+			gb.id = ObjectInstanceID(parameters.caster->getCasterUnitId());
 			gb.bonus = b;
 			env->apply(&gb);
 		}
@@ -312,7 +314,7 @@ ESpellCastResult DimensionDoorMechanics::applyAdventureEffects(SpellCastEnvironm
 	std::stringstream cachingStr;
 	cachingStr << "source_" << vstd::to_underlying(BonusSource::SPELL_EFFECT) << "id_" << owner->id.num;
 
-	if(parameters.caster->getHeroCaster()->getBonuses(Selector::source(BonusSource::SPELL_EFFECT, owner->id), Selector::all, cachingStr.str())->size() >= owner->getLevelPower(schoolLevel)) //limit casts per turn
+	if(parameters.caster->getHeroCaster()->getBonuses(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(owner->id)), Selector::all, cachingStr.str())->size() >= owner->getLevelPower(schoolLevel)) //limit casts per turn
 	{
 		InfoWindow iw;
 		iw.player = parameters.caster->getCasterOwner();
@@ -323,8 +325,8 @@ ESpellCastResult DimensionDoorMechanics::applyAdventureEffects(SpellCastEnvironm
 	}
 
 	GiveBonus gb;
-	gb.id = parameters.caster->getCasterUnitId();
-	gb.bonus = Bonus(BonusDuration::ONE_DAY, BonusType::NONE, BonusSource::SPELL_EFFECT, 0, owner->id);
+	gb.id = ObjectInstanceID(parameters.caster->getCasterUnitId());
+	gb.bonus = Bonus(BonusDuration::ONE_DAY, BonusType::NONE, BonusSource::SPELL_EFFECT, 0, BonusSourceID(owner->id));
 	env->apply(&gb);
 
 	if(!dest->isClear(curr)) //wrong dest tile
@@ -528,8 +530,7 @@ ESpellCastResult TownPortalMechanics::beginCast(SpellCastEnvironment * env, cons
 		request.player = parameters.caster->getCasterOwner();
 		request.title.appendLocalString(EMetaText::JK_TXT, 40);
 		request.description.appendLocalString(EMetaText::JK_TXT, 41);
-		request.icon.id = Component::EComponentType::SPELL;
-		request.icon.subtype = owner->id.toEnum();
+		request.icon = Component(ComponentType::SPELL, owner->id);
 
 		env->genericQuery(&request, request.player, queryCallback);
 
@@ -601,7 +602,7 @@ ESpellCastResult ViewMechanics::applyAdventureEffects(SpellCastEnvironment * env
 
 	const auto spellLevel = parameters.caster->getSpellSchoolLevel(owner);
 
-	const auto fowMap = env->getCb()->getPlayerTeam(parameters.caster->getCasterOwner())->fogOfWarMap;
+	const auto & fowMap = env->getCb()->getPlayerTeam(parameters.caster->getCasterOwner())->fogOfWarMap;
 
 	for(const CGObjectInstance * obj : env->getMap()->objects)
 	{

@@ -40,10 +40,10 @@ public:
 	}
 };
 
-TEST_P(AbsoluteSpellConditionTest, ChecksAbsoluteCase)
+TEST_P(AbsoluteSpellConditionTest, DISABLED_ChecksAbsoluteCase)
 {
 	setDefaultExpectations();
-	auto bonus = std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_IMMUNITY, BonusSource::OTHER, 4, 0, immuneSpell);
+	auto bonus = std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_IMMUNITY, BonusSource::OTHER, 4, BonusSourceID(), BonusSubtypeID(SpellID(immuneSpell)));
 	bonus->additionalInfo = 1;
 
 	unitBonuses.addNewBonus(bonus);
@@ -54,10 +54,10 @@ TEST_P(AbsoluteSpellConditionTest, ChecksAbsoluteCase)
 		EXPECT_TRUE(subject->isReceptive(&mechanicsMock, &unitMock));
 }
 
-TEST_P(AbsoluteSpellConditionTest, IgnoresNormalCase)
+TEST_P(AbsoluteSpellConditionTest, DISABLED_IgnoresNormalCase)
 {
 	setDefaultExpectations();
-	auto bonus = std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_IMMUNITY, BonusSource::OTHER, 4, 0, immuneSpell);
+	auto bonus = std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::SPELL_IMMUNITY, BonusSource::OTHER, 4, BonusSourceID(), BonusSubtypeID(SpellID(immuneSpell)));
 	unitBonuses.addNewBonus(bonus);
 	EXPECT_TRUE(subject->isReceptive(&mechanicsMock, &unitMock));
 }

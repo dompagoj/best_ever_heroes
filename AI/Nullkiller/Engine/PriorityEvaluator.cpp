@@ -22,6 +22,7 @@
 #include "../../../lib/filesystem/Filesystem.h"
 #include "../Goals/ExecuteHeroChain.h"
 #include "../Goals/BuildThis.h"
+#include "../Goals/StayAtTown.h"
 #include "../Goals/ExchangeSwapTownHeroes.h"
 #include "../Goals/DismissHero.h"
 #include "../Markers/UnlockCluster.h"
@@ -121,7 +122,7 @@ TResources getCreatureBankResources(const CGObjectInstance * target, const CGHer
 {
 	//Fixme: unused variable hero
 
-	auto objectInfo = VLC->objtypeh->getHandlerFor(target->ID, target->subID)->getObjectInfo(target->appearance);
+	auto objectInfo = target->getObjectHandler()->getObjectInfo(target->appearance);
 	CBankInfo * bankInfo = dynamic_cast<CBankInfo *>(objectInfo.get());
 	auto resources = bankInfo->getPossibleResourcesReward();
 	TResources result = TResources();
@@ -136,11 +137,23 @@ TResources getCreatureBankResources(const CGObjectInstance * target, const CGHer
 	return sum > 1 ? result / sum : result;
 }
 
+uint64_t getResourcesGoldReward(const TResources & res)
+{
+	int nonGoldResources = res[EGameResID::GEMS]
+		+ res[EGameResID::SULFUR]
+		+ res[EGameResID::WOOD]
+		+ res[EGameResID::ORE]
+		+ res[EGameResID::CRYSTAL]
+		+ res[EGameResID::MERCURY];
+
+	return res[EGameResID::GOLD] + 100 * nonGoldResources;
+}
+
 uint64_t getCreatureBankArmyReward(const CGObjectInstance * target, const CGHeroInstance * hero)
 {
-	auto objectInfo = VLC->objtypeh->getHandlerFor(target->ID, target->subID)->getObjectInfo(target->appearance);
+	auto objectInfo = target->getObjectHandler()->getObjectInfo(target->appearance);
 	CBankInfo * bankInfo = dynamic_cast<CBankInfo *>(objectInfo.get());
-	auto creatures = bankInfo->getPossibleCreaturesReward();
+	auto creatures = bankInfo->getPossibleCreaturesReward(target->cb);
 	uint64_t result = 0;
 
 	const auto& slots = hero->Slots();
@@ -235,19 +248,19 @@ int getDwellingArmyCost(const CGObjectInstance * target)
 	return cost;
 }
 
-uint64_t evaluateArtifactArmyValue(CArtifactInstance * art)
+static uint64_t evaluateArtifactArmyValue(const CArtifactInstance * art)
 {
 	if(art->artType->getId() == ArtifactID::SPELL_SCROLL)
 		return 1500;
 
 	auto statsValue =
-		10 * art->valOfBonuses(BonusType::MOVEMENT, 1)
+		10 * art->valOfBonuses(BonusType::MOVEMENT, BonusCustomSubtype::heroMovementLand)
 		+ 1200 * art->valOfBonuses(BonusType::STACKS_SPEED)
 		+ 700 * art->valOfBonuses(BonusType::MORALE)
-		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, static_cast<int>(PrimarySkill::ATTACK))
-		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, static_cast<int>(PrimarySkill::DEFENSE))
-		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, static_cast<int>(PrimarySkill::KNOWLEDGE))
-		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, static_cast<int>(PrimarySkill::SPELL_POWER))
+		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::ATTACK))
+		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::DEFENSE))
+		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::KNOWLEDGE))
+		+ 700 * art->valOfBonuses(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::SPELL_POWER))
 		+ 500 * art->valOfBonuses(BonusType::LUCK);
 
 	auto classValue = 0;
@@ -309,6 +322,9 @@ uint64_t RewardEvaluator::getArmyReward(
 			: 0;
 	case Obj::PANDORAS_BOX:
 		return 5000;
+	case Obj::MAGIC_WELL:
+	case Obj::MAGIC_SPRING:
+		return getManaRecoveryArmyReward(hero);
 	default:
 		return 0;
 	}
@@ -450,6 +466,11 @@ uint64_t RewardEvaluator::townArmyGrowth(const CGTownInstance * town) const
 	return result;
 }
 
+uint64_t RewardEvaluator::getManaRecoveryArmyReward(const CGHeroInstance * hero) const
+{
+	return ai->heroManager->getMagicStrength(hero) * 10000 * (1.0f - std::sqrt(static_cast<float>(hero->mana) / hero->manaLimit()));
+}
+
 float RewardEvaluator::getStrategicalValue(const CGObjectInstance * target) const
 {
 	if(!target)
@@ -458,14 +479,20 @@ float RewardEvaluator::getStrategicalValue(const CGObjectInstance * target) cons
 	switch(target->ID)
 	{
 	case Obj::MINE:
-		return target->subID == GameResID(EGameResID::GOLD)
+	{
+		auto mine = dynamic_cast<const CGMine *>(target);
+		return mine->producedResource == EGameResID::GOLD
 			? 0.5f 
-			: 0.4f * getTotalResourceRequirementStrength(target->subID) + 0.1f * getResourceRequirementStrength(target->subID);
+			: 0.4f * getTotalResourceRequirementStrength(mine->producedResource) + 0.1f * getResourceRequirementStrength(mine->producedResource);
+	}
 
 	case Obj::RESOURCE:
-		return target->subID == GameResID(EGameResID::GOLD)
+	{
+		auto resource = dynamic_cast<const CGResource *>(target);
+		return resource->resourceID() == EGameResID::GOLD
 			? 0
-			: 0.2f * getTotalResourceRequirementStrength(target->subID) + 0.4f * getResourceRequirementStrength(target->subID);
+			: 0.2f * getTotalResourceRequirementStrength(resource->resourceID()) + 0.4f * getResourceRequirementStrength(resource->resourceID());
+	}
 
 	case Obj::CREATURE_BANK:
 	{
@@ -476,7 +503,7 @@ float RewardEvaluator::getStrategicalValue(const CGObjectInstance * target) cons
 			//Evaluate resources used for construction. Gold is evaluated separately.
 			if (it->resType != EGameResID::GOLD)
 			{
-				sum += 0.1f * getResourceRequirementStrength(it->resType);
+				sum += 0.1f * it->resVal * getResourceRequirementStrength(it->resType);
 			}
 		}
 		return sum;
@@ -514,19 +541,25 @@ float RewardEvaluator::getStrategicalValue(const CGObjectInstance * target) cons
 			? getEnemyHeroStrategicalValue(dynamic_cast<const CGHeroInstance *>(target))
 			: 0;
 
+	case Obj::KEYMASTER:
+		return 0.6f;
+
 	default:
 		return 0;
 	}
 }
 
-float RewardEvaluator::evaluateWitchHutSkillScore(const CGWitchHut * hut, const CGHeroInstance * hero, HeroRole role) const
+float RewardEvaluator::evaluateWitchHutSkillScore(const CGObjectInstance * hut, const CGHeroInstance * hero, HeroRole role) const
 {
+	auto rewardable = dynamic_cast<const CRewardableObject *>(hut);
+	assert(rewardable);
+
+	auto skill = SecondarySkill(*rewardable->configuration.getVariable("secondarySkill", "gainedSkill"));
+
 	if(!hut->wasVisited(hero->tempOwner))
 		return role == HeroRole::SCOUT ? 2 : 0;
 
-	auto skill = SecondarySkill(hut->ability);
-
-	if(hero->getSecSkillLevel(skill) != SecSkillLevel::NONE
+	if(hero->getSecSkillLevel(skill) != MasteryLevel::NONE
 		|| hero->secSkills.size() >= GameConstants::SKILL_PER_HERO)
 		return 0;
 
@@ -566,10 +599,12 @@ float RewardEvaluator::getSkillReward(const CGObjectInstance * target, const CGH
 	case Obj::LIBRARY_OF_ENLIGHTENMENT:
 		return 8;
 	case Obj::WITCH_HUT:
-		return evaluateWitchHutSkillScore(dynamic_cast<const CGWitchHut *>(target), hero, role);
+		return evaluateWitchHutSkillScore(target, hero, role);
 	case Obj::PANDORAS_BOX:
 		//Can contains experience, spells, or skills (only on custom maps)
 		return 2.5f;
+	case Obj::PYRAMID:
+		return 3.0f;
 	case Obj::HERO:
 		return ai->cb->getPlayerRelations(target->tempOwner, ai->playerID) == PlayerRelations::ENEMIES
 			? enemyHeroEliminationSkillRewardRatio * dynamic_cast<const CGHeroInstance *>(target)->level
@@ -581,15 +616,15 @@ float RewardEvaluator::getSkillReward(const CGObjectInstance * target, const CGH
 
 const HitMapInfo & RewardEvaluator::getEnemyHeroDanger(const int3 & tile, uint8_t turn) const
 {
-	auto & treatNode = ai->dangerHitMap->getTileTreat(tile);
+	auto & treatNode = ai->dangerHitMap->getTileThreat(tile);
 
 	if(treatNode.maximumDanger.danger == 0)
-		return HitMapInfo::NoTreat;
+		return HitMapInfo::NoThreat;
 
 	if(treatNode.maximumDanger.turn <= turn)
 		return treatNode.maximumDanger;
 
-	return treatNode.fastestDanger.turn <= turn ? treatNode.fastestDanger : HitMapInfo::NoTreat;
+	return treatNode.fastestDanger.turn <= turn ? treatNode.fastestDanger : HitMapInfo::NoThreat;
 }
 
 int32_t getArmyCost(const CArmedInstance * army)
@@ -614,12 +649,14 @@ int32_t RewardEvaluator::getGoldReward(const CGObjectInstance * target, const CG
 	const int dailyIncomeMultiplier = 5;
 	const float enemyArmyEliminationGoldRewardRatio = 0.2f;
 	const int32_t heroEliminationBonus = GameConstants::HERO_GOLD_COST / 2;
-	auto isGold = target->subID == GameResID(EGameResID::GOLD); // TODO: other resorces could be sold but need to evaluate market power
 
 	switch(target->ID)
 	{
 	case Obj::RESOURCE:
-		return isGold ? 600 : 100;
+	{
+		auto * res = dynamic_cast<const CGResource*>(target);
+		return res->resourceID() == GameResID::GOLD ? 600 : 100;
+	}
 	case Obj::TREASURE_CHEST:
 		return 1500;
 	case Obj::WATER_WHEEL:
@@ -628,7 +665,10 @@ int32_t RewardEvaluator::getGoldReward(const CGObjectInstance * target, const CG
 		return dailyIncomeMultiplier * estimateTownIncome(ai->cb.get(), target, hero);
 	case Obj::MINE:
 	case Obj::ABANDONED_MINE:
-		return dailyIncomeMultiplier * (isGold ? 1000 : 75);
+	{
+		auto * mine = dynamic_cast<const CGMine*>(target);
+		return dailyIncomeMultiplier * (mine->producedResource == GameResID::GOLD ? 1000 : 75);
+	}
 	case Obj::MYSTICAL_GARDEN:
 	case Obj::WINDMILL:
 		return 100;
@@ -637,7 +677,7 @@ int32_t RewardEvaluator::getGoldReward(const CGObjectInstance * target, const CG
 	case Obj::WAGON:
 		return 100;
 	case Obj::CREATURE_BANK:
-		return getCreatureBankResources(target, hero)[EGameResID::GOLD];
+		return getResourcesGoldReward(getCreatureBankResources(target, hero));
 	case Obj::CRYPT:
 	case Obj::DERELICT_SHIP:
 		return 3000;
@@ -690,6 +730,22 @@ public:
 
 		evaluationContext.armyReward += upgradeValue;
 		evaluationContext.addNonCriticalStrategicalValue(upgradeValue / (float)armyUpgrade.hero->getArmyStrength());
+	}
+};
+
+class StayAtTownManaRecoveryEvaluator : public IEvaluationContextBuilder
+{
+public:
+	virtual void buildEvaluationContext(EvaluationContext & evaluationContext, Goals::TSubgoal task) const override
+	{
+		if(task->goalType != Goals::STAY_AT_TOWN)
+			return;
+
+		Goals::StayAtTown & stayAtTown = dynamic_cast<Goals::StayAtTown &>(*task);
+
+		evaluationContext.armyReward += evaluationContext.evaluator.getManaRecoveryArmyReward(stayAtTown.getHero().get());
+		evaluationContext.movementCostByRole[evaluationContext.heroRole] += stayAtTown.getMovementWasted();
+		evaluationContext.movementCost += stayAtTown.getMovementWasted();
 	}
 };
 
@@ -977,7 +1033,7 @@ public:
 
 uint64_t RewardEvaluator::getUpgradeArmyReward(const CGTownInstance * town, const BuildingInfo & bi) const
 {
-	if(ai->buildAnalyzer->hasAnyBuilding(town->subID, bi.id))
+	if(ai->buildAnalyzer->hasAnyBuilding(town->getFaction(), bi.id))
 		return 0;
 
 	auto creaturesToUpgrade = ai->armyManager->getTotalCreaturesAvailable(bi.baseCreatureID);
@@ -998,6 +1054,7 @@ PriorityEvaluator::PriorityEvaluator(const Nullkiller * ai)
 	evaluationContextBuilders.push_back(std::make_shared<DefendTownEvaluator>());
 	evaluationContextBuilders.push_back(std::make_shared<ExchangeSwapTownHeroesContextBuilder>());
 	evaluationContextBuilders.push_back(std::make_shared<DismissHeroContextBuilder>(ai));
+	evaluationContextBuilders.push_back(std::make_shared<StayAtTownManaRecoveryEvaluator>());
 }
 
 EvaluationContext PriorityEvaluator::buildEvaluationContext(Goals::TSubgoal goal) const

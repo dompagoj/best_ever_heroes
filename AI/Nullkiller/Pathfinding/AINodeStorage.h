@@ -41,11 +41,19 @@ namespace AIPathfinding
 	const int CHAIN_MAX_DEPTH = 4;
 }
 
+enum DayFlags : ui8
+{
+	NONE = 0,
+	FLY_CAST = 1,
+	WATER_WALK_CAST = 2
+};
+
 struct AIPathNode : public CGPathNode
 {
 	uint64_t danger;
 	uint64_t armyLoss;
-	uint32_t manaCost;
+	int16_t manaCost;
+	DayFlags dayFlags;
 	const AIPathNode * chainOther;
 	std::shared_ptr<const SpecialAction> specialAction;
 	const ChainActor * actor;
@@ -65,6 +73,7 @@ struct AIPathNodeInfo
 	float cost;
 	uint8_t turns;
 	int3 coord;
+	EPathfindingLayer layer;
 	uint64_t danger;
 	const CGHeroInstance * targetHero;
 	int parentIndex;
@@ -199,7 +208,8 @@ public:
 		EPathNodeAction action,
 		int turn,
 		int movementLeft,
-		float cost) const;
+		float cost,
+		bool saveToCommited = true) const;
 
 	inline const AIPathNode * getAINode(const CGPathNode * node) const
 	{

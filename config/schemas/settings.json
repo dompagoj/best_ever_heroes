@@ -39,7 +39,8 @@
 				"useSavePrefix",
 				"savePrefix",
 				"startTurnAutosave",
-				"enableUiEnhancements"
+				"enableUiEnhancements",
+				"audioMuteFocus"
 			],
 			"properties" : {
 				"playerName" : {
@@ -131,6 +132,10 @@
 				"enableUiEnhancements" : {
 					"type": "boolean",
 					"default": true
+				},
+				"audioMuteFocus" : {
+					"type": "boolean",
+					"default": false
 				}
 			}
 		},
@@ -194,6 +199,7 @@
 				},
 				"driver" : {
 					"type" : "string",
+					"defaultWindows" : "",
 					"default" : "opengl",
 					"description" : "preferred graphics backend driver name for SDL2"
 				},
@@ -235,7 +241,7 @@
 			"type" : "object",
 			"additionalProperties" : false,
 			"default" : {},
-			"required" : [ "heroMoveTime", "enemyMoveTime", "scrollSpeedPixels", "heroReminder", "quickCombat", "objectAnimation", "terrainAnimation", "forceQuickCombat", "borderScroll", "leftButtonDrag", "smoothDragging", "backgroundDimLevel" ],
+			"required" : [ "heroMoveTime", "enemyMoveTime", "scrollSpeedPixels", "heroReminder", "quickCombat", "objectAnimation", "terrainAnimation", "forceQuickCombat", "borderScroll", "leftButtonDrag", "smoothDragging", "backgroundDimLevel", "hideBackground" ],
 			"properties" : {
 				"heroMoveTime" : {
 					"type" : "number",
@@ -255,7 +261,7 @@
 				},
 				"quickCombat" : {
 					"type" : "boolean",
-					"default" : true
+					"default" : false
 				},
 				"objectAnimation" : {
 					"type" : "boolean",
@@ -288,13 +294,17 @@
 					"type" : "number",
 					"default" : 128
 				},
+				"hideBackground" : {
+					"type" : "boolean",
+					"default" : false
+				}
 			}
 		},
 		"battle" : {
 			"type" : "object",
 			"additionalProperties" : false,
 			"default" : {},
-			"required" : [ "speedFactor", "mouseShadow", "cellBorders", "stackRange", "movementHighlightOnHover", "rangeLimitHighlightOnHover", "showQueue", "swipeAttackDistance", "queueSize", "stickyHeroInfoWindows", "enableAutocombatSpells" ],
+			"required" : [ "speedFactor", "mouseShadow", "cellBorders", "stackRange", "movementHighlightOnHover", "rangeLimitHighlightOnHover", "showQueue", "swipeAttackDistance", "queueSize", "stickyHeroInfoWindows", "enableAutocombatSpells", "endWithAutocombat" ],
 			"properties" : {
 				"speedFactor" : {
 					"type" : "number",
@@ -340,6 +350,10 @@
 				"enableAutocombatSpells" : {
 					"type": "boolean",
 					"default": true
+				},
+				"endWithAutocombat" : {
+					"type": "boolean",
+					"default": false
 				}
 			}
 		},
@@ -576,7 +590,9 @@
 				"compactTownCreatureInfo",
 				"infoBarPick",
 				"skipBattleIntroMusic",
-				"infoBarCreatureManagement"
+				"infoBarCreatureManagement",
+				"enableLargeSpellbook",
+				"skipAdventureMapAnimations"
 			],
 			"properties" : {
 				"showGrid" : {
@@ -609,7 +625,15 @@
 				},
 				"infoBarCreatureManagement": {
 					"type" : "boolean",
-					"default" : false
+					"default" : true
+				},
+				"enableLargeSpellbook" : {
+					"type": "boolean",
+					"default": true
+				},
+				"skipAdventureMapAnimations": {
+					"type": "boolean",
+					"default": false
 				}
 			}
 		}

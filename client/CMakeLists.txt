@@ -51,7 +51,10 @@ set(client_SRCS
 	lobby/CSavingScreen.cpp
 	lobby/CScenarioInfoScreen.cpp
 	lobby/CSelectionBase.cpp
+	lobby/TurnOptionsTab.cpp
+	lobby/ExtraOptionsTab.cpp
 	lobby/OptionsTab.cpp
+	lobby/OptionsTabBase.cpp
 	lobby/RandomMapTab.cpp
 	lobby/SelectionTab.cpp
 
@@ -113,17 +116,24 @@ set(client_SRCS
 	widgets/CArtifactsOfHeroBackpack.cpp
 	widgets/CWindowWithArtifacts.cpp
 	widgets/RadialMenu.cpp
+	widgets/markets/CAltarArtifacts.cpp
+	widgets/markets/CAltarCreatures.cpp
+	widgets/markets/CTradeBase.cpp
+	widgets/markets/TradePanels.cpp
 
+	windows/CAltarWindow.cpp
 	windows/CCastleInterface.cpp
 	windows/CCreatureWindow.cpp
 	windows/CHeroOverview.cpp
 	windows/CHeroWindow.cpp
 	windows/CKingdomInterface.cpp
+	windows/CMapOverview.cpp
 	windows/CMessage.cpp
 	windows/CPuzzleWindow.cpp
 	windows/CQuestLog.cpp
 	windows/CSpellWindow.cpp
 	windows/CTradeWindow.cpp
+	windows/CTutorialWindow.cpp
 	windows/CWindowObject.cpp
 	windows/CreaturePurchaseCard.cpp
 	windows/GUIClasses.cpp
@@ -207,7 +217,10 @@ set(client_HEADERS
 	lobby/CSavingScreen.h
 	lobby/CScenarioInfoScreen.h
 	lobby/CSelectionBase.h
+	lobby/TurnOptionsTab.h
+	lobby/ExtraOptionsTab.h
 	lobby/OptionsTab.h
+	lobby/OptionsTabBase.h
 	lobby/RandomMapTab.h
 	lobby/SelectionTab.h
 
@@ -278,17 +291,24 @@ set(client_HEADERS
 	widgets/CArtifactsOfHeroBackpack.h
 	widgets/CWindowWithArtifacts.h
 	widgets/RadialMenu.h
+	widgets/markets/CAltarArtifacts.h
+	widgets/markets/CAltarCreatures.h
+	widgets/markets/CTradeBase.h
+	widgets/markets/TradePanels.h
 
+	windows/CAltarWindow.h
 	windows/CCastleInterface.h
 	windows/CCreatureWindow.h
 	windows/CHeroOverview.h
 	windows/CHeroWindow.h
 	windows/CKingdomInterface.h
 	windows/CMessage.h
+	windows/CMapOverview.h
 	windows/CPuzzleWindow.h
 	windows/CQuestLog.h
 	windows/CSpellWindow.h
 	windows/CTradeWindow.h
+	windows/CTutorialWindow.h
 	windows/CWindowObject.h
 	windows/CreaturePurchaseCard.h
 	windows/GUIClasses.h

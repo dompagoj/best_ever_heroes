@@ -14,14 +14,17 @@
 #include "../CSpellHandler.h"
 #include "../ISpellMechanics.h"
 
-#include "../../NetPacks.h"
+#include "../../MetaString.h"
 #include "../../CStack.h"
 #include "../../battle/IBattleState.h"
 #include "../../battle/CBattleInfoCallback.h"
+#include "../../networkPacks/PacksForClientBattle.h"
 #include "../../CGeneralTextHandler.h"
+#include "../../Languages.h"
 #include "../../serializer/JsonSerializeFormat.h"
 
 #include <vcmi/spells/Spell.h>
+
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -89,11 +92,11 @@ bool Damage::isReceptive(const Mechanics * m, const battle::Unit * unit) const
 	if(!UnitEffect::isReceptive(m, unit))
 		return false;
 
-	bool isImmune = m->getSpell()->isMagical() && (unit->getBonusBearer()->valOfBonuses(BonusType::SPELL_DAMAGE_REDUCTION, SpellSchool(ESpellSchool::ANY)) >= 100); //General spell damage immunity
+	bool isImmune = m->getSpell()->isMagical() && (unit->getBonusBearer()->valOfBonuses(BonusType::SPELL_DAMAGE_REDUCTION, BonusSubtypeID(SpellSchool::ANY)) >= 100); //General spell damage immunity
 	//elemental immunity for damage
 	m->getSpell()->forEachSchool([&](const SpellSchool & cnf, bool & stop)
 	{
-		isImmune |= (unit->getBonusBearer()->valOfBonuses(BonusType::SPELL_DAMAGE_REDUCTION, cnf) >= 100); //100% reduction is immunity
+		isImmune |= (unit->getBonusBearer()->valOfBonuses(BonusType::SPELL_DAMAGE_REDUCTION, BonusSubtypeID(cnf)) >= 100); //100% reduction is immunity
 	});
 
 	return !isImmune;
@@ -151,6 +154,16 @@ void Damage::describeEffect(std::vector<MetaString> & log, const Mechanics * m, 
 		m->caster->getCasterName(line);
 		log.push_back(line);
 	}
+	else if(m->getSpell()->getJsonKey().find("accurateShot") != std::string::npos && !multiple)
+	{
+		MetaString line;
+		std::string preferredLanguage = VLC->generaltexth->getPreferredLanguage();
+		std::string textID = "vcmi.battleWindow.accurateShot.resultDescription";
+		line.appendTextID(Languages::getPluralFormTextID( preferredLanguage, kills, textID));
+		line.replaceNumber(kills);
+		firstTarget->addNameReplacement(line, kills != 1);
+		log.push_back(line);
+	}
 	else if(m->getSpellIndex() == SpellID::THUNDERBOLT && !multiple)
 	{
 		{
@@ -175,7 +188,7 @@ void Damage::describeEffect(std::vector<MetaString> & log, const Mechanics * m, 
 		{
 			MetaString line;
 			line.appendLocalString(EMetaText::GENERAL_TXT, 376); // Spell %s does %d damage
-			line.replaceLocalString(EMetaText::SPELL_NAME, m->getSpellIndex());
+			line.replaceName(m->getSpellId());
 			line.replaceNumber(static_cast<int>(damage));
 
 			log.push_back(line);

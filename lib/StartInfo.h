@@ -13,6 +13,7 @@
 
 #include "GameConstants.h"
 #include "TurnTimerInfo.h"
+#include "ExtraOptionsInfo.h"
 #include "campaign/CampaignConstants.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
@@ -30,10 +31,17 @@ struct DLL_LINKAGE SimturnsInfo
 	/// Maximum number of turns that might be played simultaneously unless contact is detected
 	int optionalTurns = 0;
 	/// If set to true, human and 1 AI can act at the same time
-	bool allowHumanWithAI = true;
+	bool allowHumanWithAI = false;
+
+	bool operator == (const SimturnsInfo & other) const
+	{
+		return requiredTurns == other.requiredTurns &&
+				optionalTurns == other.optionalTurns &&
+				allowHumanWithAI == other.allowHumanWithAI;
+	}
 
 	template <typename Handler>
-	void serialize(Handler &h, const int version)
+	void serialize(Handler &h)
 	{
 		h & requiredTurns;
 		h & optionalTurns;
@@ -41,25 +49,25 @@ struct DLL_LINKAGE SimturnsInfo
 	}
 };
 
+enum class PlayerStartingBonus : int8_t
+{
+	RANDOM   = -1,
+	ARTIFACT =  0,
+	GOLD     =  1,
+	RESOURCE =  2
+};
+
 /// Struct which describes the name, the color, the starting bonus of a player
 struct DLL_LINKAGE PlayerSettings
 {
 	enum { PLAYER_AI = 0 }; // for use in playerID
 
-	enum Ebonus {
-		NONE     = -2,
-		RANDOM   = -1,
-		ARTIFACT =  0,
-		GOLD     =  1,
-		RESOURCE =  2
-	};
-
-	Ebonus bonus;
+	PlayerStartingBonus bonus;
 	FactionID castle;
 	HeroTypeID hero;
 	HeroTypeID heroPortrait; //-1 if default, else ID
 
-	std::string heroName;
+	std::string heroNameTextId;
 	PlayerColor color; //from 0 -
 	enum EHandicap {NO_HANDICAP, MILD, SEVERE};
 	EHandicap handicap;//0-no, 1-mild, 2-severe
@@ -68,12 +76,12 @@ struct DLL_LINKAGE PlayerSettings
 	std::set<ui8> connectedPlayerIDs; //Empty - AI, or connectrd player ids
 	bool compOnly; //true if this player is a computer only player; required for RMG
 	template <typename Handler>
-	void serialize(Handler &h, const int version)
+	void serialize(Handler &h)
 	{
 		h & castle;
 		h & hero;
 		h & heroPortrait;
-		h & heroName;
+		h & heroNameTextId;
 		h & bonus;
 		h & color;
 		h & handicap;
@@ -85,6 +93,9 @@ struct DLL_LINKAGE PlayerSettings
 	PlayerSettings();
 	bool isControlledByAI() const;
 	bool isControlledByHuman() const;
+
+	FactionID getCastleValidated() const;
+	HeroTypeID getHeroValidated() const;
 };
 
 /// Struct which describes the difficulty, the turn time,.. of a heroes match.
@@ -102,8 +113,10 @@ struct DLL_LINKAGE StartInfo
 	ui32 seedPostInit; //so we know that game is correctly synced at the start; 0 if not known yet
 	ui32 mapfileChecksum; //0 if not relevant
 	std::string startTimeIso8601;
+	std::string fileURI;
 	SimturnsInfo simturnsInfo;
 	TurnTimerInfo turnTimerInfo;
+	ExtraOptionsInfo extraOptionsInfo;
 	std::string mapname; // empty for random map, otherwise name of the map or savegame
 	bool createRandomMap() const { return mapGenOptions != nullptr; }
 	std::shared_ptr<CMapGenOptions> mapGenOptions;
@@ -118,7 +131,7 @@ struct DLL_LINKAGE StartInfo
 	std::string getCampaignName() const;
 
 	template <typename Handler>
-	void serialize(Handler &h, const int version)
+	void serialize(Handler &h)
 	{
 		h & mode;
 		h & difficulty;
@@ -127,15 +140,20 @@ struct DLL_LINKAGE StartInfo
 		h & seedPostInit;
 		h & mapfileChecksum;
 		h & startTimeIso8601;
+		h & fileURI;
 		h & simturnsInfo;
 		h & turnTimerInfo;
+		if(h.version >= Handler::Version::HAS_EXTRA_OPTIONS)
+			h & extraOptionsInfo;
+		else
+			extraOptionsInfo = ExtraOptionsInfo();
 		h & mapname;
 		h & mapGenOptions;
 		h & campState;
 	}
 
 	StartInfo() : mode(INVALID), difficulty(1), seedToBeUsed(0), seedPostInit(0),
-		mapfileChecksum(0), startTimeIso8601(vstd::getDateTimeISO8601Basic(std::time(0)))
+		mapfileChecksum(0), startTimeIso8601(vstd::getDateTimeISO8601Basic(std::time(nullptr))), fileURI("")
 	{
 
 	}
@@ -146,7 +164,7 @@ struct ClientPlayer
 	int connection;
 	std::string name;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & connection;
 		h & name;
@@ -166,7 +184,7 @@ struct DLL_LINKAGE LobbyState
 
 	LobbyState() : si(new StartInfo()), hostClientId(-1), campaignMap(CampaignScenarioID::NONE), campaignBonus(-1) {}
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & si;
 		h & mi;
@@ -195,7 +213,7 @@ struct DLL_LINKAGE LobbyInfo : public LobbyState
 	PlayerColor clientFirstColor(int clientId) const;
 	bool isClientColor(int clientId, const PlayerColor & color) const;
 	ui8 clientFirstId(int clientId) const; // Used by chat only!
-	PlayerInfo & getPlayerInfo(int color);
+	PlayerInfo & getPlayerInfo(PlayerColor color);
 	TeamID getPlayerTeamId(const PlayerColor & color);
 };
 

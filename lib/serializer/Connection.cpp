@@ -10,8 +10,8 @@
 #include "StdInc.h"
 #include "Connection.h"
 
-#include "../registerTypes/RegisterTypes.h"
-#include "../mapping/CMapHeader.h"
+#include "../networkPacks/NetPacksBase.h"
+#include "../gameState/CGameState.h"
 
 #include <boost/asio.hpp>
 
@@ -45,8 +45,6 @@ void CConnection::init()
 
 	enableSmartPointerSerialization();
 	disableStackSendingByID();
-	registerTypes(iser);
-	registerTypes(oser);
 #ifndef VCMI_ENDIAN_BIG
 	myEndianess = true;
 #else
@@ -61,7 +59,7 @@ void CConnection::init()
 	mutexRead = std::make_shared<boost::mutex>();
 	mutexWrite = std::make_shared<boost::mutex>();
 
-	iser.fileVersion = SERIALIZATION_VERSION;
+	iser.version = ESerializationVersion::CURRENT;
 }
 
 CConnection::CConnection(const std::string & host, ui16 port, std::string Name, std::string UUID):
@@ -151,6 +149,9 @@ void CConnection::flushBuffers()
 	if(!enableBufferedWrite)
 		return;
 
+	if (!socket)
+		throw std::runtime_error("Can't write to closed socket!");
+
 	try
 	{
 		asio::write(*socket, connectionBuffers->writeBuffer);
@@ -167,6 +168,9 @@ void CConnection::flushBuffers()
 
 int CConnection::write(const void * data, unsigned size)
 {
+	if (!socket)
+		throw std::runtime_error("Can't write to closed socket!");
+
 	try
 	{
 		if(enableBufferedWrite)
@@ -224,10 +228,16 @@ int CConnection::read(void * data, unsigned size)
 
 CConnection::~CConnection()
 {
-	if(handler)
-		handler->join();
-
 	close();
+
+	if(handler)
+	{
+		// ugly workaround to avoid self-join if last strong reference to shared_ptr that owns this class has been released in this very thread, e.g. on netpack processing
+		if (boost::this_thread::get_id() != handler->get_id())
+			handler->join();
+		else
+			handler->detach();
+	}
 }
 
 template<class T>
@@ -243,6 +253,15 @@ void CConnection::close()
 {
 	if(socket)
 	{
+		try
+		{
+			socket->shutdown(boost::asio::ip::tcp::socket::shutdown_receive);
+		}
+		catch (const boost::system::system_error & e)
+		{
+			logNetwork->error("error closing socket: %s", e.what());
+		}
+
 		socket->close();
 		socket.reset();
 	}
@@ -272,13 +291,7 @@ CPack * CConnection::retrievePack()
 	iser & pack;
 	logNetwork->trace("Received CPack of type %s", (pack ? typeid(*pack).name() : "nullptr"));
 	if(pack == nullptr)
-	{
 		logNetwork->error("Received a nullptr CPack! You should check whether client and server ABI matches.");
-	}
-	else
-	{
-		pack->c = this->shared_from_this();
-	}
 
 	enableBufferedRead = false;
 
@@ -330,6 +343,7 @@ void CConnection::enterGameplayConnectionMode(CGameState * gs)
 	enableStackSendingByID();
 	disableSmartPointerSerialization();
 	addStdVecItems(gs);
+	iser.cb = gs->callback;
 }
 
 void CConnection::disableSmartVectorMemberSerialization()

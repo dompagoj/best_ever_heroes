@@ -92,8 +92,7 @@ public:
 	bool isAllowedExchange(ObjectInstanceID id1, ObjectInstanceID id2);
 	void giveSpells(const CGTownInstance *t, const CGHeroInstance *h);
 
-	CGameHandler();
-	CGameHandler(CVCMIServer * lobby);
+	explicit CGameHandler(CVCMIServer * lobby);
 	~CGameHandler();
 
 	//////////////////////////////////////////////////////////////////////////
@@ -101,15 +100,16 @@ public:
 	//do sth
 	void changeSpells(const CGHeroInstance * hero, bool give, const std::set<SpellID> &spells) override;
 	bool removeObject(const CGObjectInstance * obj, const PlayerColor & initiator) override;
-	void createObject(const int3 & visitablePosition, const PlayerColor & initiator, Obj type, int32_t subtype ) override;
+	void createObject(const int3 & visitablePosition, const PlayerColor & initiator, MapObjectID type, MapObjectSubID subtype) override;
 	void setOwner(const CGObjectInstance * obj, PlayerColor owner) override;
+	void giveExperience(const CGHeroInstance * hero, TExpType val) override;
 	void changePrimSkill(const CGHeroInstance * hero, PrimarySkill which, si64 val, bool abs=false) override;
 	void changeSecSkill(const CGHeroInstance * hero, SecondarySkill which, int val, bool abs=false) override;
 
 	void showBlockingDialog(BlockingDialog *iw) override;
 	void showTeleportDialog(TeleportDialog *iw) override;
 	void showGarrisonDialog(ObjectInstanceID upobj, ObjectInstanceID hid, bool removableUnits) override;
-	void showThievesGuildWindow(PlayerColor player, ObjectInstanceID requestingObjId) override;
+	void showObjectWindow(const CGObjectInstance * object, EOpenWindowMode window, const CGHeroInstance * visitor, bool addQuery) override;
 	void giveResource(PlayerColor player, GameResID which, int val) override;
 	void giveResources(PlayerColor player, TResources resources) override;
 
@@ -127,10 +127,9 @@ public:
 	void removeAfterVisit(const CGObjectInstance *object) override;
 
 	bool giveHeroNewArtifact(const CGHeroInstance * h, const CArtifact * artType, ArtifactPosition pos = ArtifactPosition::FIRST_AVAILABLE) override;
-	bool giveHeroArtifact(const CGHeroInstance * h, const CArtifactInstance * a, ArtifactPosition pos) override;
-	void putArtifact(const ArtifactLocation &al, const CArtifactInstance *a) override;
+	bool putArtifact(const ArtifactLocation & al, const CArtifactInstance * art, std::optional<bool> askAssemble) override;
 	void removeArtifact(const ArtifactLocation &al) override;
-	bool moveArtifact(const ArtifactLocation & al1, const ArtifactLocation & al2) override;
+	bool moveArtifact(const ArtifactLocation & src, const ArtifactLocation & dst) override;
 	bool bulkMoveArtifacts(ObjectInstanceID srcHero, ObjectInstanceID dstHero, bool swap, bool equipped, bool backpack);
 	bool eraseArtifactByClient(const ArtifactLocation & al);
 	void synchronizeArtifactHandlerLists();
@@ -143,20 +142,22 @@ public:
 	bool moveHero(ObjectInstanceID hid, int3 dst, ui8 teleporting, bool transit = false, PlayerColor asker = PlayerColor::NEUTRAL) override;
 	void giveHeroBonus(GiveBonus * bonus) override;
 	void setMovePoints(SetMovePoints * smp) override;
+	void setMovePoints(ObjectInstanceID hid, int val, bool absolute) override;
 	void setManaPoints(ObjectInstanceID hid, int val) override;
 	void giveHero(ObjectInstanceID id, PlayerColor player, ObjectInstanceID boatId = ObjectInstanceID()) override;
 	void changeObjPos(ObjectInstanceID objid, int3 newPos, const PlayerColor & initiator) override;
 	void heroExchange(ObjectInstanceID hero1, ObjectInstanceID hero2) override;
 
-	void changeFogOfWar(int3 center, ui32 radius, PlayerColor player, bool hide) override;
-	void changeFogOfWar(std::unordered_set<int3> &tiles, PlayerColor player, bool hide) override;
+	void changeFogOfWar(int3 center, ui32 radius, PlayerColor player, ETileVisibility mode) override;
+	void changeFogOfWar(std::unordered_set<int3> &tiles, PlayerColor player,ETileVisibility mode) override;
 	
 	void castSpell(const spells::Caster * caster, SpellID spellID, const int3 &pos) override;
 
 	/// Returns hero that is currently visiting this object, or nullptr if no visit is active
 	const CGHeroInstance * getVisitingHero(const CGObjectInstance *obj);
 	bool isVisitCoveredByAnotherQuery(const CGObjectInstance *obj, const CGHeroInstance *hero) override;
-	void setObjProperty(ObjectInstanceID objid, int prop, si64 val) override;
+	void setObjPropertyValue(ObjectInstanceID objid, ObjProperty prop, int32_t value) override;
+	void setObjPropertyID(ObjectInstanceID objid, ObjProperty prop, ObjPropertyID identifier) override;
 	void showInfoDialog(InfoWindow * iw) override;
 	void showInfoDialog(const std::string & msg, PlayerColor player) override;
 
@@ -182,8 +183,8 @@ public:
 
 	bool queryReply( QueryID qid, std::optional<int32_t> reply, PlayerColor player );
 	bool buildBoat( ObjectInstanceID objid, PlayerColor player );
-	bool setFormation( ObjectInstanceID hid, ui8 formation );
-	bool tradeResources(const IMarket *market, ui32 val, PlayerColor player, ui32 id1, ui32 id2);
+	bool setFormation( ObjectInstanceID hid, EArmyFormation formation );
+	bool tradeResources(const IMarket *market, ui32 amountToSell, PlayerColor player, GameResID toSell, GameResID toBuy);
 	bool sacrificeCreatures(const IMarket * market, const CGHeroInstance * hero, const std::vector<SlotID> & slot, const std::vector<ui32> & count);
 	bool sendResources(ui32 val, PlayerColor player, GameResID r1, PlayerColor r2);
 	bool sellCreatures(ui32 count, const IMarket *market, const CGHeroInstance * hero, SlotID slot, GameResID resourceID);
@@ -221,7 +222,7 @@ public:
 	bool dig(const CGHeroInstance *h);
 	void moveArmy(const CArmedInstance *src, const CArmedInstance *dst, bool allowMerging);
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & QID;
 		h & getRandomGenerator();
@@ -248,7 +249,7 @@ public:
 
 	void wrongPlayerMessage(CPackForServer * pack, PlayerColor expectedplayer);
 	/// Unconditionally throws with "Action not allowed" message
-	void throwNotAllowedAction(CPackForServer * pack);
+	[[noreturn]] void throwNotAllowedAction(CPackForServer * pack);
 	/// Throws if player stated in pack is not making turn right now
 	void throwIfPlayerNotActive(CPackForServer * pack);
 	/// Throws if object is not owned by pack sender
@@ -256,7 +257,7 @@ public:
 	/// Throws if player is not present on connection of this pack
 	void throwIfWrongPlayer(CPackForServer * pack, PlayerColor player);
 	void throwIfWrongPlayer(CPackForServer * pack);
-	void throwAndComplain(CPackForServer * pack, std::string txt);
+	[[noreturn]] void throwAndComplain(CPackForServer * pack, std::string txt);
 
 	bool isPlayerOwns(CPackForServer * pack, ObjectInstanceID id);
 

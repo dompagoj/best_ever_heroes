@@ -10,6 +10,7 @@
 #pragma once
 
 #include "../gui/CIntObject.h"
+#include "../../lib/networkPacks/Component.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -31,6 +32,7 @@ class CGarrisonInt;
 class CCreatureAnim;
 class CComponent;
 class CAnimImage;
+class LRClickableArea;
 
 /// Shows a text by moving the mouse cursor over the object
 class CHoverableArea: public virtual CIntObject
@@ -133,8 +135,13 @@ class CInteractableTownTooltip : public CIntObject
 	std::shared_ptr<CAnimImage> res1;
 	std::shared_ptr<CAnimImage> res2;
 	std::shared_ptr<CGarrisonInt> garrison;
+	
+	std::shared_ptr<LRClickableArea> fastTavern;
+	std::shared_ptr<LRClickableArea> fastMarket;
+	std::shared_ptr<LRClickableArea> fastTownHall;
+	std::shared_ptr<LRClickableArea> fastArmyPurchase;
 
-	void init(const InfoAboutTown & town);
+	void init(const CGTownInstance * town);
 public:
 	CInteractableTownTooltip(Point pos, const CGTownInstance * town);
 };
@@ -183,12 +190,15 @@ public:
 
 	CHeroArea(int x, int y, const CGHeroInstance * hero);
 	void addClickCallback(ClickFunctor callback);
+	void addRClickCallback(ClickFunctor callback);
 	void clickPressed(const Point & cursorPosition) override;
+	void showPopupWindow(const Point & cursorPosition) override;
 	void hover(bool on) override;
 private:
 	const CGHeroInstance * hero;
 	std::shared_ptr<CAnimImage> portrait;
 	ClickFunctor clickFunctor;
+	ClickFunctor clickRFunctor;
 	ClickFunctor showPopupHandler;
 };
 
@@ -196,13 +206,12 @@ private:
 class LRClickableAreaWTextComp: public LRClickableAreaWText
 {
 public:
-	int type;
-	int baseType;
-	int bonusValue;
+	Component component;
+
 	void clickPressed(const Point & cursorPosition) override;
 	void showPopupWindow(const Point & cursorPosition) override;
 
-	LRClickableAreaWTextComp(const Rect &Pos = Rect(0,0,0,0), int BaseType = -1);
+	LRClickableAreaWTextComp(const Rect &Pos = Rect(0,0,0,0), ComponentType baseType = ComponentType::NONE);
 	std::shared_ptr<CComponent> createComponent() const;
 };
 
@@ -215,9 +224,21 @@ public:
 	LRClickableAreaOpenTown(const Rect & Pos, const CGTownInstance * Town);
 };
 
+/// Can do action on click
+class LRClickableArea: public CIntObject
+{
+	std::function<void()> onClick;
+	std::function<void()> onPopup;
+public:
+	void clickPressed(const Point & cursorPosition) override;
+	void showPopupWindow(const Point & cursorPosition) override;
+	LRClickableArea(const Rect & Pos, std::function<void()> onClick = nullptr, std::function<void()> onPopup = nullptr);
+};
+
 class MoraleLuckBox : public LRClickableAreaWTextComp
 {
 	std::shared_ptr<CAnimImage> image;
+	std::shared_ptr<CLabel> label;
 public:
 	bool morale; //true if morale, false if luck
 	bool small;
@@ -232,9 +253,14 @@ class TransparentFilledRectangle : public CIntObject
 	ColorRGBA color;
 	ColorRGBA colorLine;
 	bool drawLine;
+	int lineWidth;
+
 public:
     TransparentFilledRectangle(Rect position, ColorRGBA color);
-    TransparentFilledRectangle(Rect position, ColorRGBA color, ColorRGBA colorLine);
+    TransparentFilledRectangle(Rect position, ColorRGBA color, ColorRGBA colorLine, int width = 1);
+	void setDrawBorder(bool on);
+	bool getDrawBorder();
+	void setBorderWidth(int width);
     void showAll(Canvas & to) override;
 };
 
@@ -246,4 +272,17 @@ class SimpleLine : public CIntObject
 public:
     SimpleLine(Point pos1, Point pos2, ColorRGBA color);
     void showAll(Canvas & to) override;
+};
+
+class SelectableSlot : public LRClickableAreaWTextComp
+{
+	std::unique_ptr<TransparentFilledRectangle> selection;
+
+public:
+	SelectableSlot(Rect area, Point oversize, const int width);
+	SelectableSlot(Rect area, Point oversize);
+	SelectableSlot(Rect area, const int width = 1);
+	void selectSlot(bool on);
+	bool isSelected() const;
+	void setSelectionWidth(int width);
 };

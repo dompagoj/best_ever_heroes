@@ -39,6 +39,7 @@
 #include "../lib/StartInfo.h"
 #include "../lib/CConfigHandler.h"
 #include "../lib/mapObjects/CGMarket.h"
+#include "../lib/mapObjects/CGTownInstance.h"
 #include "../lib/gameState/CGameState.h"
 #include "../lib/CStack.h"
 #include "../lib/battle/BattleInfo.h"
@@ -156,6 +157,9 @@ void ApplyClientNetPackVisitor::visitSetMana(SetMana & pack)
 	const CGHeroInstance *h = cl.getHero(pack.hid);
 	callInterfaceIfPresent(cl, h->tempOwner, &IGameEventsReceiver::heroManaPointsChanged, h);
 
+	if(settings["session"]["headless"].Bool())
+		return;
+
 	for (auto window : GH.windows().findWindows<BattleWindow>())
 		window->heroManaPointsChanged(h);
 }
@@ -177,7 +181,7 @@ void ApplyClientNetPackVisitor::visitFoWChange(FoWChange & pack)
 		}
 		if(cl.getPlayerRelations(i.first, pack.player) != PlayerRelations::ENEMIES)
 		{
-			if(pack.mode)
+			if(pack.mode == ETileVisibility::REVEALED)
 				i.second->tileRevealed(pack.tiles);
 			else
 				i.second->tileHidden(pack.tiles);
@@ -267,14 +271,14 @@ void ApplyClientNetPackVisitor::visitBulkSmartRebalanceStacks(BulkSmartRebalance
 
 void ApplyClientNetPackVisitor::visitPutArtifact(PutArtifact & pack)
 {
-	callInterfaceIfPresent(cl, pack.al.owningPlayer(), &IGameEventsReceiver::artifactPut, pack.al);
+	callInterfaceIfPresent(cl, cl.getOwner(pack.al.artHolder), &IGameEventsReceiver::artifactPut, pack.al);
 	if(pack.askAssemble)
-		callInterfaceIfPresent(cl, pack.al.owningPlayer(), &IGameEventsReceiver::askToAssembleArtifact, pack.al);
+		callInterfaceIfPresent(cl, cl.getOwner(pack.al.artHolder), &IGameEventsReceiver::askToAssembleArtifact, pack.al);
 }
 
 void ApplyClientNetPackVisitor::visitEraseArtifact(EraseArtifact & pack)
 {
-	callInterfaceIfPresent(cl, pack.al.owningPlayer(), &IGameEventsReceiver::artifactRemoved, pack.al);
+	callInterfaceIfPresent(cl, cl.getOwner(pack.al.artHolder), &IGameEventsReceiver::artifactRemoved, pack.al);
 }
 
 void ApplyClientNetPackVisitor::visitMoveArtifact(MoveArtifact & pack)
@@ -286,9 +290,9 @@ void ApplyClientNetPackVisitor::visitMoveArtifact(MoveArtifact & pack)
 			callInterfaceIfPresent(cl, player, &IGameEventsReceiver::askToAssembleArtifact, pack.dst);
 	};
 
-	moveArtifact(pack.src.owningPlayer());
-	if(pack.src.owningPlayer() != pack.dst.owningPlayer())
-		moveArtifact(pack.dst.owningPlayer());
+	moveArtifact(cl.getOwner(pack.src.artHolder));
+	if(cl.getOwner(pack.src.artHolder) != cl.getOwner(pack.dst.artHolder))
+		moveArtifact(cl.getOwner(pack.dst.artHolder));
 
 	cl.invalidatePaths(); // hero might have equipped/unequipped Angel Wings
 }
@@ -301,13 +305,13 @@ void ApplyClientNetPackVisitor::visitBulkMoveArtifacts(BulkMoveArtifacts & pack)
 		{
 			auto srcLoc = ArtifactLocation(pack.srcArtHolder, slotToMove.srcPos);
 			auto dstLoc = ArtifactLocation(pack.dstArtHolder, slotToMove.dstPos);
-			MoveArtifact ma(&srcLoc, &dstLoc, false);
+			MoveArtifact ma(&srcLoc, &dstLoc, pack.askAssemble);
 			visitMoveArtifact(ma);
 		}
 	};
 
-	auto srcOwner = std::get<ConstTransitivePtr<CGHeroInstance>>(pack.srcArtHolder)->tempOwner;
-	auto dstOwner = std::get<ConstTransitivePtr<CGHeroInstance>>(pack.dstArtHolder)->tempOwner;
+	auto srcOwner = cl.getOwner(pack.srcArtHolder);
+	auto dstOwner = cl.getOwner(pack.dstArtHolder);
 
 	// Begin a session of bulk movement of arts. It is not necessary but useful for the client optimization.
 	callInterfaceIfPresent(cl, srcOwner, &IGameEventsReceiver::bulkArtMovementStart, pack.artsPack0.size() + pack.artsPack1.size());
@@ -321,14 +325,14 @@ void ApplyClientNetPackVisitor::visitBulkMoveArtifacts(BulkMoveArtifacts & pack)
 
 void ApplyClientNetPackVisitor::visitAssembledArtifact(AssembledArtifact & pack)
 {
-	callInterfaceIfPresent(cl, pack.al.owningPlayer(), &IGameEventsReceiver::artifactAssembled, pack.al);
+	callInterfaceIfPresent(cl, cl.getOwner(pack.al.artHolder), &IGameEventsReceiver::artifactAssembled, pack.al);
 
 	cl.invalidatePaths(); // hero might have equipped/unequipped Angel Wings
 }
 
 void ApplyClientNetPackVisitor::visitDisassembledArtifact(DisassembledArtifact & pack)
 {
-	callInterfaceIfPresent(cl, pack.al.owningPlayer(), &IGameEventsReceiver::artifactDisassembled, pack.al);
+	callInterfaceIfPresent(cl, cl.getOwner(pack.al.artHolder), &IGameEventsReceiver::artifactDisassembled, pack.al);
 
 	cl.invalidatePaths(); // hero might have equipped/unequipped Angel Wings
 }
@@ -350,15 +354,16 @@ void ApplyClientNetPackVisitor::visitGiveBonus(GiveBonus & pack)
 	cl.invalidatePaths();
 	switch(pack.who)
 	{
-	case GiveBonus::ETarget::HERO:
+	case GiveBonus::ETarget::OBJECT:
 		{
-			const CGHeroInstance *h = gs.getHero(ObjectInstanceID(pack.id));
-			callInterfaceIfPresent(cl, h->tempOwner, &IGameEventsReceiver::heroBonusChanged, h, pack.bonus, true);
+			const CGHeroInstance *h = gs.getHero(pack.id.as<ObjectInstanceID>());
+			if (h)
+				callInterfaceIfPresent(cl, h->tempOwner, &IGameEventsReceiver::heroBonusChanged, h, pack.bonus, true);
 		}
 		break;
 	case GiveBonus::ETarget::PLAYER:
 		{
-			callInterfaceIfPresent(cl, PlayerColor(pack.id), &IGameEventsReceiver::playerBonusChanged, pack.bonus, true);
+			callInterfaceIfPresent(cl, pack.id.as<PlayerColor>(), &IGameEventsReceiver::playerBonusChanged, pack.bonus, true);
 		}
 		break;
 	}
@@ -367,19 +372,21 @@ void ApplyClientNetPackVisitor::visitGiveBonus(GiveBonus & pack)
 void ApplyFirstClientNetPackVisitor::visitChangeObjPos(ChangeObjPos & pack)
 {
 	CGObjectInstance *obj = gs.getObjInstance(pack.objid);
-	if(CGI->mh)
+	if(CGI && CGI->mh)
+	{
 		CGI->mh->onObjectFadeOut(obj, pack.initiator);
-
-	CGI->mh->waitForOngoingAnimations();
+		CGI->mh->waitForOngoingAnimations();
+	}
 }
 
 void ApplyClientNetPackVisitor::visitChangeObjPos(ChangeObjPos & pack)
 {
 	CGObjectInstance *obj = gs.getObjInstance(pack.objid);
-	if(CGI->mh)
+	if(CGI && CGI->mh)
+	{
 		CGI->mh->onObjectFadeIn(obj, pack.initiator);
-
-	CGI->mh->waitForOngoingAnimations();
+		CGI->mh->waitForOngoingAnimations();
+	}
 	cl.invalidatePaths();
 }
 
@@ -403,7 +410,7 @@ void ApplyClientNetPackVisitor::visitPlayerReinitInterface(PlayerReinitInterface
 			if (cl.gameState()->isPlayerMakingTurn(player))
 			{
 				callAllInterfaces(cl, &IGameEventsReceiver::playerStartsTurn, player);
-				callOnlyThatInterface(cl, player, &CGameInterface::yourTurn, -1);
+				callOnlyThatInterface(cl, player, &CGameInterface::yourTurn, QueryID::NONE);
 			}
 		}
 	};
@@ -431,16 +438,17 @@ void ApplyClientNetPackVisitor::visitRemoveBonus(RemoveBonus & pack)
 	cl.invalidatePaths();
 	switch(pack.who)
 	{
-	case GiveBonus::ETarget::HERO:
+	case GiveBonus::ETarget::OBJECT:
 		{
-			const CGHeroInstance *h = gs.getHero(ObjectInstanceID(pack.id));
-			callInterfaceIfPresent(cl, h->tempOwner, &IGameEventsReceiver::heroBonusChanged, h, pack.bonus, false);
+			const CGHeroInstance *h = gs.getHero(pack.whoID.as<ObjectInstanceID>());
+			if (h)
+				callInterfaceIfPresent(cl, h->tempOwner, &IGameEventsReceiver::heroBonusChanged, h, pack.bonus, false);
 		}
 		break;
 	case GiveBonus::ETarget::PLAYER:
 		{
 			//const PlayerState *p = gs.getPlayerState(pack.id);
-			callInterfaceIfPresent(cl, PlayerColor(pack.id), &IGameEventsReceiver::playerBonusChanged, pack.bonus, false);
+			callInterfaceIfPresent(cl, pack.whoID.as<PlayerColor>(), &IGameEventsReceiver::playerBonusChanged, pack.bonus, false);
 		}
 		break;
 	}
@@ -462,7 +470,8 @@ void ApplyFirstClientNetPackVisitor::visitRemoveObject(RemoveObject & pack)
 			i->second->objectRemoved(o, pack.initiator);
 	}
 
-	CGI->mh->waitForOngoingAnimations();
+	if(CGI->mh)
+		CGI->mh->waitForOngoingAnimations();
 }
 
 void ApplyClientNetPackVisitor::visitRemoveObject(RemoveObject & pack)
@@ -548,9 +557,11 @@ void ApplyClientNetPackVisitor::visitNewStructures(NewStructures & pack)
 	}
 
 	// invalidate section of map view with our object and force an update
-	CGI->mh->onObjectInstantRemove(town, town->getOwner());
-	CGI->mh->onObjectInstantAdd(town, town->getOwner());
-
+	if(CGI->mh)
+	{
+		CGI->mh->onObjectInstantRemove(town, town->getOwner());
+		CGI->mh->onObjectInstantAdd(town, town->getOwner());
+	}
 }
 void ApplyClientNetPackVisitor::visitRazeStructures(RazeStructures & pack)
 {
@@ -561,8 +572,11 @@ void ApplyClientNetPackVisitor::visitRazeStructures(RazeStructures & pack)
 	}
 
 	// invalidate section of map view with our object and force an update
-	CGI->mh->onObjectInstantRemove(town, town->getOwner());
-	CGI->mh->onObjectInstantAdd(town, town->getOwner());
+	if(CGI->mh)
+	{
+		CGI->mh->onObjectInstantRemove(town, town->getOwner());
+		CGI->mh->onObjectInstantAdd(town, town->getOwner());
+	}
 }
 
 void ApplyClientNetPackVisitor::visitSetAvailableCreatures(SetAvailableCreatures & pack)
@@ -602,7 +616,7 @@ void ApplyClientNetPackVisitor::visitSetHeroesInTown(SetHeroesInTown & pack)
 void ApplyClientNetPackVisitor::visitHeroRecruited(HeroRecruited & pack)
 {
 	CGHeroInstance *h = gs.map->heroesOnMap.back();
-	if(h->subID != pack.hid)
+	if(h->getHeroType() != pack.hid)
 	{
 		logNetwork->error("Something wrong with hero recruited!");
 	}
@@ -646,7 +660,7 @@ void ApplyFirstClientNetPackVisitor::visitSetObjectProperty(SetObjectProperty & 
 	}
 
 	// invalidate section of map view with our object and force an update with new flag color
-	if (pack.what == ObjProperty::OWNER)
+	if (pack.what == ObjProperty::OWNER && CGI->mh)
 	{
 		auto object = gs.getObjInstance(pack.id);
 		CGI->mh->onObjectInstantRemove(object, object->getOwner());
@@ -663,7 +677,7 @@ void ApplyClientNetPackVisitor::visitSetObjectProperty(SetObjectProperty & pack)
 	}
 
 	// invalidate section of map view with our object and force an update with new flag color
-	if (pack.what == ObjProperty::OWNER)
+	if (pack.what == ObjProperty::OWNER && CGI->mh)
 	{
 		auto object = gs.getObjInstance(pack.id);
 		CGI->mh->onObjectInstantAdd(object, object->getOwner());
@@ -897,7 +911,7 @@ void ApplyClientNetPackVisitor::visitPlayerEndsTurn(PlayerEndsTurn & pack)
 
 void ApplyClientNetPackVisitor::visitTurnTimeUpdate(TurnTimeUpdate & pack)
 {
-	logNetwork->debug("Server sets turn timer {turn: %d, base: %d, battle: %d, creature: %d} for %s", pack.turnTimer.turnTimer, pack.turnTimer.baseTimer, pack.turnTimer.battleTimer, pack.turnTimer.creatureTimer, pack.player.toString());
+	logNetwork->debug("Server sets turn timer {turn: %d, base: %d, battle: %d, creature: %d} for %s", pack.turnTimer.turnTimer, pack.turnTimer.baseTimer, pack.turnTimer.battleTimer, pack.turnTimer.unitTimer, pack.player.toString());
 }
 
 void ApplyClientNetPackVisitor::visitPlayerMessageClient(PlayerMessageClient & pack)
@@ -936,58 +950,66 @@ void ApplyClientNetPackVisitor::visitOpenWindow(OpenWindow & pack)
 	case EOpenWindowMode::RECRUITMENT_FIRST:
 	case EOpenWindowMode::RECRUITMENT_ALL:
 		{
-			const CGDwelling *dw = dynamic_cast<const CGDwelling*>(cl.getObj(ObjectInstanceID(pack.id1)));
-			const CArmedInstance *dst = dynamic_cast<const CArmedInstance*>(cl.getObj(ObjectInstanceID(pack.id2)));
-			callInterfaceIfPresent(cl, dst->tempOwner, &IGameEventsReceiver::showRecruitmentDialog, dw, dst, pack.window == EOpenWindowMode::RECRUITMENT_FIRST ? 0 : -1);
+			const CGDwelling *dw = dynamic_cast<const CGDwelling*>(cl.getObj(ObjectInstanceID(pack.object)));
+			const CArmedInstance *dst = dynamic_cast<const CArmedInstance*>(cl.getObj(ObjectInstanceID(pack.visitor)));
+			callInterfaceIfPresent(cl, dst->tempOwner, &IGameEventsReceiver::showRecruitmentDialog, dw, dst, pack.window == EOpenWindowMode::RECRUITMENT_FIRST ? 0 : -1, pack.queryID);
 		}
 		break;
 	case EOpenWindowMode::SHIPYARD_WINDOW:
 		{
-			const IShipyard *sy = IShipyard::castFrom(cl.getObj(ObjectInstanceID(pack.id1)));
+			assert(pack.queryID == QueryID::NONE);
+			const IShipyard *sy = IShipyard::castFrom(cl.getObj(ObjectInstanceID(pack.object)));
 			callInterfaceIfPresent(cl, sy->getObject()->getOwner(), &IGameEventsReceiver::showShipyardDialog, sy);
 		}
 		break;
 	case EOpenWindowMode::THIEVES_GUILD:
 		{
+			assert(pack.queryID == QueryID::NONE);
 			//displays Thieves' Guild window (when hero enters Den of Thieves)
-			const CGObjectInstance *obj = cl.getObj(ObjectInstanceID(pack.id2));
-			callInterfaceIfPresent(cl, PlayerColor(pack.id1), &IGameEventsReceiver::showThievesGuildWindow, obj);
+			const CGObjectInstance *obj = cl.getObj(ObjectInstanceID(pack.object));
+			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.visitor));
+			callInterfaceIfPresent(cl, hero->getOwner(), &IGameEventsReceiver::showThievesGuildWindow, obj);
 		}
 		break;
 	case EOpenWindowMode::UNIVERSITY_WINDOW:
 		{
 			//displays University window (when hero enters University on adventure map)
-			const IMarket *market = IMarket::castFrom(cl.getObj(ObjectInstanceID(pack.id1)));
-			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.id2));
-			callInterfaceIfPresent(cl, hero->tempOwner, &IGameEventsReceiver::showUniversityWindow, market, hero);
+			const IMarket *market = IMarket::castFrom(cl.getObj(ObjectInstanceID(pack.object)));
+			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.visitor));
+			callInterfaceIfPresent(cl, hero->tempOwner, &IGameEventsReceiver::showUniversityWindow, market, hero, pack.queryID);
 		}
 		break;
 	case EOpenWindowMode::MARKET_WINDOW:
 		{
 			//displays Thieves' Guild window (when hero enters Den of Thieves)
-			const CGObjectInstance *obj = cl.getObj(ObjectInstanceID(pack.id1));
-			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.id2));
+			const CGObjectInstance *obj = cl.getObj(ObjectInstanceID(pack.object));
+			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.visitor));
 			const IMarket *market = IMarket::castFrom(obj);
-			callInterfaceIfPresent(cl, cl.getTile(obj->visitablePos())->visitableObjects.back()->tempOwner, &IGameEventsReceiver::showMarketWindow, market, hero);
+			callInterfaceIfPresent(cl, cl.getTile(obj->visitablePos())->visitableObjects.back()->tempOwner, &IGameEventsReceiver::showMarketWindow, market, hero, pack.queryID);
 		}
 		break;
 	case EOpenWindowMode::HILL_FORT_WINDOW:
 		{
+			assert(pack.queryID == QueryID::NONE);
 			//displays Hill fort window
-			const CGObjectInstance *obj = cl.getObj(ObjectInstanceID(pack.id1));
-			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.id2));
+			const CGObjectInstance *obj = cl.getObj(ObjectInstanceID(pack.object));
+			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.visitor));
 			callInterfaceIfPresent(cl, cl.getTile(obj->visitablePos())->visitableObjects.back()->tempOwner, &IGameEventsReceiver::showHillFortWindow, obj, hero);
 		}
 		break;
 	case EOpenWindowMode::PUZZLE_MAP:
 		{
-			callInterfaceIfPresent(cl, PlayerColor(pack.id1), &IGameEventsReceiver::showPuzzleMap);
+			assert(pack.queryID == QueryID::NONE);
+			const CGHeroInstance *hero = cl.getHero(ObjectInstanceID(pack.visitor));
+			callInterfaceIfPresent(cl, hero->getOwner(), &IGameEventsReceiver::showPuzzleMap);
 		}
 		break;
 	case EOpenWindowMode::TAVERN_WINDOW:
-		const CGObjectInstance *obj1 = cl.getObj(ObjectInstanceID(pack.id1)),
-								*obj2 = cl.getObj(ObjectInstanceID(pack.id2));
-		callInterfaceIfPresent(cl, obj1->tempOwner, &IGameEventsReceiver::showTavernWindow, obj2);
+		{
+			const CGObjectInstance *obj1 = cl.getObj(ObjectInstanceID(pack.object));
+			const CGHeroInstance * hero = cl.getHero(ObjectInstanceID(pack.visitor));
+			callInterfaceIfPresent(cl, hero->tempOwner, &IGameEventsReceiver::showTavernWindow, obj1, hero, pack.queryID);
+		}
 		break;
 	}
 }
@@ -1010,7 +1032,9 @@ void ApplyClientNetPackVisitor::visitNewObject(NewObject & pack)
 		if(gs.isVisible(obj, i->first))
 			i->second->newObject(obj);
 	}
-	CGI->mh->waitForOngoingAnimations();
+
+	if(CGI->mh)
+		CGI->mh->waitForOngoingAnimations();
 }
 
 void ApplyClientNetPackVisitor::visitSetAvailableArtifacts(SetAvailableArtifacts & pack)

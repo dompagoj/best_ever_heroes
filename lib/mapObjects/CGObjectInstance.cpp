@@ -17,35 +17,37 @@
 #include "../gameState/CGameState.h"
 #include "../CGeneralTextHandler.h"
 #include "../IGameCallback.h"
-#include "../NetPacks.h"
 #include "../constants/StringConstants.h"
 #include "../TerrainHandler.h"
 #include "../mapObjectConstructors/AObjectTypeHandler.h"
 #include "../mapObjectConstructors/CObjectClassesHandler.h"
 #include "../mapping/CMap.h"
+#include "../networkPacks/PacksForClient.h"
 #include "../serializer/JsonSerializeFormat.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
 //TODO: remove constructor
-CGObjectInstance::CGObjectInstance():
+CGObjectInstance::CGObjectInstance(IGameCallback *cb):
+	IObjectInterface(cb),
 	pos(-1,-1,-1),
 	ID(Obj::NO_OBJ),
 	subID(-1),
 	tempOwner(PlayerColor::UNFLAGGABLE),
-	blockVisit(false)
+	blockVisit(false),
+	removable(false)
 {
 }
 
 //must be instantiated in .cpp file for access to complete types of all member fields
 CGObjectInstance::~CGObjectInstance() = default;
 
-int32_t CGObjectInstance::getObjGroupIndex() const
+MapObjectID CGObjectInstance::getObjGroupIndex() const
 {
-	return ID.num;
+	return ID;
 }
 
-int32_t CGObjectInstance::getObjTypeIndex() const
+MapObjectSubID CGObjectInstance::getObjTypeIndex() const
 {
 	return subID;
 }
@@ -117,12 +119,12 @@ std::set<int3> CGObjectInstance::getBlockedPos() const
 	return ret;
 }
 
-std::set<int3> CGObjectInstance::getBlockedOffsets() const
+const std::set<int3> & CGObjectInstance::getBlockedOffsets() const
 {
 	return appearance->getBlockedOffsets();
 }
 
-void CGObjectInstance::setType(si32 newID, si32 newSubID)
+void CGObjectInstance::setType(MapObjectID newID, MapObjectSubID newSubID)
 {
 	auto position = visitablePos();
 	auto oldOffset = getVisitableOffset();
@@ -166,38 +168,41 @@ void CGObjectInstance::setType(si32 newID, si32 newSubID)
 	cb->gameState()->map->addBlockVisTiles(this);
 }
 
-void CGObjectInstance::initObj(CRandomGenerator & rand)
+void CGObjectInstance::pickRandomObject(CRandomGenerator & rand)
 {
-	switch(ID)
-	{
-	case Obj::TAVERN:
-		blockVisit = true;
-		break;
-	}
+	// no-op
 }
 
-void CGObjectInstance::setProperty( ui8 what, ui32 val )
+void CGObjectInstance::initObj(CRandomGenerator & rand)
 {
-	setPropertyDer(what, val); // call this before any actual changes (needed at least for dwellings)
+	// no-op
+}
+
+void CGObjectInstance::setProperty( ObjProperty what, ObjPropertyID identifier )
+{
+	setPropertyDer(what, identifier); // call this before any actual changes (needed at least for dwellings)
 
 	switch(what)
 	{
 	case ObjProperty::OWNER:
-		tempOwner = PlayerColor(val);
+		tempOwner = identifier.as<PlayerColor>();
 		break;
 	case ObjProperty::BLOCKVIS:
-		blockVisit = val;
+		// Never actually used in code, but possible in ERM
+		blockVisit = identifier.getNum();
 		break;
 	case ObjProperty::ID:
-		ID = Obj(val);
-		break;
-	case ObjProperty::SUBID:
-		subID = val;
+		ID = identifier.as<MapObjectID>();
 		break;
 	}
 }
 
-void CGObjectInstance::setPropertyDer( ui8 what, ui32 val )
+TObjectTypeHandler CGObjectInstance::getObjectHandler() const
+{
+	return VLC->objtypeh->getHandlerFor(ID, subID);
+}
+
+void CGObjectInstance::setPropertyDer( ObjProperty what, ObjPropertyID identifier )
 {}
 
 int3 CGObjectInstance::getSightCenter() const
@@ -219,10 +224,10 @@ void CGObjectInstance::giveDummyBonus(const ObjectInstanceID & heroID, BonusDura
 {
 	GiveBonus gbonus;
 	gbonus.bonus.type = BonusType::NONE;
-	gbonus.id = heroID.getNum();
+	gbonus.id = heroID;
 	gbonus.bonus.duration = duration;
-	gbonus.bonus.source = BonusSource::OBJECT;
-	gbonus.bonus.sid = ID;
+	gbonus.bonus.source = BonusSource::OBJECT_TYPE;
+	gbonus.bonus.sid = BonusSourceID(ID);
 	cb->giveHeroBonus(&gbonus);
 }
 
@@ -271,9 +276,28 @@ std::string CGObjectInstance::getHoverText(const CGHeroInstance * hero) const
 	return getHoverText(hero->tempOwner);
 }
 
+std::string CGObjectInstance::getPopupText(PlayerColor player) const
+{
+	return getHoverText(player);
+}
+std::string CGObjectInstance::getPopupText(const CGHeroInstance * hero) const
+{
+	return getHoverText(hero);
+}
+
+std::vector<Component> CGObjectInstance::getPopupComponents(PlayerColor player) const
+{
+	return {};
+}
+
+std::vector<Component> CGObjectInstance::getPopupComponents(const CGHeroInstance * hero) const
+{
+	return getPopupComponents(hero->getOwner());
+}
+
 void CGObjectInstance::onHeroVisit( const CGHeroInstance * h ) const
 {
-	switch(ID)
+	switch(ID.toEnum())
 	{
 	case Obj::SANCTUARY:
 		{
@@ -283,7 +307,7 @@ void CGObjectInstance::onHeroVisit( const CGHeroInstance * h ) const
 		break;
 	case Obj::TAVERN:
 		{
-			openWindow(EOpenWindowMode::TAVERN_WINDOW,h->id.getNum(),id.getNum());
+			cb->showObjectWindow(this, EOpenWindowMode::TAVERN_WINDOW, h, true);
 		}
 		break;
 	}
@@ -301,7 +325,14 @@ bool CGObjectInstance::isVisitable() const
 
 bool CGObjectInstance::isBlockedVisitable() const
 {
+	// TODO: Read from json
 	return blockVisit;
+}
+
+bool CGObjectInstance::isRemovable() const
+{
+	// TODO: Read from json
+	return removable;
 }
 
 bool CGObjectInstance::isCoastVisitable() const

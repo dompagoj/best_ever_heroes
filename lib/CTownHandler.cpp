@@ -49,9 +49,33 @@ const std::map<std::string, CBuilding::ETowerHeight> CBuilding::TOWER_TYPES =
 	{ "skyship", CBuilding::HEIGHT_SKYSHIP }
 };
 
+BuildingTypeUniqueID::BuildingTypeUniqueID(FactionID factionID, BuildingID buildingID ):
+	BuildingTypeUniqueID(factionID.getNum() * 0x10000 + buildingID.getNum())
+{
+	assert(factionID.getNum() >= 0);
+	assert(factionID.getNum() < 0x10000);
+	assert(buildingID.getNum() >= 0);
+	assert(buildingID.getNum() < 0x10000);
+}
+
+BuildingID BuildingTypeUniqueID::getBuilding() const
+{
+	return BuildingID(getNum() % 0x10000);
+}
+
+FactionID BuildingTypeUniqueID::getFaction() const
+{
+	return FactionID(getNum() / 0x10000);
+}
+
+const BuildingTypeUniqueID CBuilding::getUniqueTypeID() const
+{
+	return BuildingTypeUniqueID(town->faction->getId(), bid);
+}
+
 std::string CBuilding::getJsonKey() const
 {
-	return modScope + ':' + identifier;;
+	return modScope + ':' + identifier;
 }
 
 std::string CBuilding::getNameTranslated() const
@@ -120,17 +144,17 @@ CFaction::~CFaction()
 
 int32_t CFaction::getIndex() const
 {
-	return index;
+	return index.getNum();
 }
 
 int32_t CFaction::getIconIndex() const
 {
-	return index; //???
+	return index.getNum(); //???
 }
 
 std::string CFaction::getJsonKey() const
 {
-	return modScope + ':' + identifier;;
+	return modScope + ':' + identifier;
 }
 
 void CFaction::registerIcons(const IconRegistar & cb) const
@@ -148,8 +172,8 @@ void CFaction::registerIcons(const IconRegistar & cb) const
 		cb(info.icons[1][0] + 2, 0, "ITPA", info.iconSmall[1][0]);
 		cb(info.icons[1][1] + 2, 0, "ITPA", info.iconSmall[1][1]);
 
-		cb(index, 1, "CPRSMALL", info.towerIconSmall);
-		cb(index, 1, "TWCRPORT", info.towerIconLarge);
+		cb(index.getNum(), 1, "CPRSMALL", info.towerIconSmall);
+		cb(index.getNum(), 1, "TWCRPORT", info.towerIconLarge);
 
 	}
 }
@@ -293,7 +317,7 @@ CTownHandler::CTownHandler():
 
 CTownHandler::~CTownHandler()
 {
-	delete randomTown;
+	delete randomFaction; // will also delete randomTown
 }
 
 JsonNode readBuilding(CLegacyConfigParser & parser)
@@ -312,9 +336,9 @@ JsonNode readBuilding(CLegacyConfigParser & parser)
 	return ret;
 }
 
-TPropagatorPtr & CTownHandler::emptyPropagator()
+const TPropagatorPtr & CTownHandler::emptyPropagator()
 {
-	static TPropagatorPtr emptyProp(nullptr);
+	static const TPropagatorPtr emptyProp(nullptr);
 	return emptyProp;
 }
 
@@ -510,7 +534,7 @@ R CTownHandler::getMappedValue(const JsonNode & node, const R defval, const std:
 void CTownHandler::addBonusesForVanilaBuilding(CBuilding * building) const
 {
 	std::shared_ptr<Bonus> b;
-	static TPropagatorPtr playerPropagator = std::make_shared<CPropagatorNodeType>(CBonusSystemNode::ENodeTypes::PLAYER);
+	static const TPropagatorPtr playerPropagator = std::make_shared<CPropagatorNodeType>(CBonusSystemNode::ENodeTypes::PLAYER);
 
 	if(building->bid == BuildingID::TAVERN)
 	{
@@ -527,16 +551,16 @@ void CTownHandler::addBonusesForVanilaBuilding(CBuilding * building) const
 		b = createBonus(building, BonusType::LUCK, +2);
 		break;
 	case BuildingSubID::SPELL_POWER_GARRISON_BONUS:
-		b = createBonus(building, BonusType::PRIMARY_SKILL, +2, static_cast<int>(PrimarySkill::SPELL_POWER));
+		b = createBonus(building, BonusType::PRIMARY_SKILL, +2, BonusSubtypeID(PrimarySkill::SPELL_POWER));
 		break;
 	case BuildingSubID::ATTACK_GARRISON_BONUS:
-		b = createBonus(building, BonusType::PRIMARY_SKILL, +2, static_cast<int>(PrimarySkill::ATTACK));
+		b = createBonus(building, BonusType::PRIMARY_SKILL, +2, BonusSubtypeID(PrimarySkill::ATTACK));
 		break;
 	case BuildingSubID::DEFENSE_GARRISON_BONUS:
-		b = createBonus(building, BonusType::PRIMARY_SKILL, +2, static_cast<int>(PrimarySkill::DEFENSE));
+		b = createBonus(building, BonusType::PRIMARY_SKILL, +2, BonusSubtypeID(PrimarySkill::DEFENSE));
 		break;
 	case BuildingSubID::LIGHTHOUSE:
-		b = createBonus(building, BonusType::MOVEMENT, +500, playerPropagator, 0);
+		b = createBonus(building, BonusType::MOVEMENT, +500, BonusCustomSubtype::heroMovementSea, playerPropagator);
 		break;
 	}
 
@@ -544,26 +568,32 @@ void CTownHandler::addBonusesForVanilaBuilding(CBuilding * building) const
 		building->addNewBonus(b, building->buildingBonuses);
 }
 
-std::shared_ptr<Bonus> CTownHandler::createBonus(CBuilding * build, BonusType type, int val, int subtype) const
+std::shared_ptr<Bonus> CTownHandler::createBonus(CBuilding * build, BonusType type, int val) const
 {
-	return createBonus(build, type, val, emptyPropagator(), subtype);
+	return createBonus(build, type, val, BonusSubtypeID(), emptyPropagator());
 }
 
-std::shared_ptr<Bonus> CTownHandler::createBonus(CBuilding * build, BonusType type, int val, TPropagatorPtr & prop, int subtype) const
+std::shared_ptr<Bonus> CTownHandler::createBonus(CBuilding * build, BonusType type, int val, BonusSubtypeID subtype) const
+{
+	return createBonus(build, type, val, subtype, emptyPropagator());
+}
+
+std::shared_ptr<Bonus> CTownHandler::createBonus(CBuilding * build, BonusType type, int val, BonusSubtypeID subtype, const TPropagatorPtr & prop) const
 {
 	std::ostringstream descr;
 	descr << build->getNameTranslated();
-	return createBonusImpl(build->bid, type, val, prop, descr.str(), subtype);
+	return createBonusImpl(build->bid, build->town->faction->getId(), type, val, prop, descr.str(), subtype);
 }
 
 std::shared_ptr<Bonus> CTownHandler::createBonusImpl(const BuildingID & building,
+													 const FactionID & faction,
 													 BonusType type,
 													 int val,
-													 TPropagatorPtr & prop,
+													 const TPropagatorPtr & prop,
 													 const std::string & description,
-													 int subtype) const
+													 BonusSubtypeID subtype) const
 {
-	auto b = std::make_shared<Bonus>(BonusDuration::PERMANENT, type, BonusSource::TOWN_STRUCTURE, val, building, description, subtype);
+	auto b = std::make_shared<Bonus>(BonusDuration::PERMANENT, type, BonusSource::TOWN_STRUCTURE, val, BuildingTypeUniqueID(faction, building), subtype, description);
 
 	if(prop)
 		b->addPropagator(prop);
@@ -575,12 +605,12 @@ void CTownHandler::loadSpecialBuildingBonuses(const JsonNode & source, BonusList
 {
 	for(const auto & b : source.Vector())
 	{
-		auto bonus = JsonUtils::parseBuildingBonus(b, building->bid, building->getNameTranslated());
+		auto bonus = JsonUtils::parseBuildingBonus(b, building->town->faction->getId(), building->bid, building->getNameTranslated());
 
 		if(bonus == nullptr)
 			continue;
 
-		bonus->sid = Bonus::getSid32(building->town->faction->getIndex(), building->bid);
+		bonus->sid = BonusSourceID(building->getUniqueTypeID());
 		//JsonUtils::parseBuildingBonus produces UNKNOWN type propagator instead of empty.
 		if(bonus->propagator != nullptr
 			&& bonus->propagator->getPropagatorType() == CBonusSystemNode::ENodeTypes::UNKNOWN)
@@ -644,7 +674,7 @@ void CTownHandler::loadBuilding(CTown * town, const std::string & stringID, cons
 				ret->subId = BuildingSubID::CUSTOM_VISITING_BONUS;
 
 			for(auto & bonus : ret->onVisitBonuses)
-				bonus->sid = Bonus::getSid32(ret->town->faction->getIndex(), ret->bid);
+				bonus->sid = BonusSourceID(ret->getUniqueTypeID());
 		}
 		
 		if(source["type"].String() == "configurable" && ret->subId == BuildingSubID::NONE)
@@ -656,7 +686,7 @@ void CTownHandler::loadBuilding(CTown * town, const std::string & stringID, cons
 	//MODS COMPATIBILITY FOR 0.96
 	if(!ret->produce.nonZero())
 	{
-		switch (ret->bid) {
+		switch (ret->bid.toEnum()) {
 			break; case BuildingID::VILLAGE_HALL: ret->produce[EGameResID::GOLD] = 500;
 			break; case BuildingID::TOWN_HALL :   ret->produce[EGameResID::GOLD] = 1000;
 			break; case BuildingID::CITY_HALL :   ret->produce[EGameResID::GOLD] = 2000;
@@ -704,7 +734,7 @@ void CTownHandler::loadBuilding(CTown * town, const std::string & stringID, cons
 
 	ret->town->buildings[ret->bid] = ret;
 
-	registerObject(source.meta, ret->town->getBuildingScope(), ret->identifier, ret->bid);
+	registerObject(source.meta, ret->town->getBuildingScope(), ret->identifier, ret->bid.getNum());
 }
 
 void CTownHandler::loadBuildings(CTown * town, const JsonNode & source)
@@ -961,7 +991,7 @@ void CTownHandler::loadTown(CTown * town, const JsonNode & source)
 
 		VLC->identifiers()->requestIdentifier(node.second.meta, "heroClass",node.first, [=](si32 classID)
 		{
-			VLC->heroh->classes[HeroClassID(classID)]->selectionProbability[town->faction->getId()] = chance;
+			VLC->heroclassesh->objects[classID]->selectionProbability[town->faction->getId()] = chance;
 		});
 	}
 
@@ -1085,10 +1115,10 @@ void CTownHandler::loadObject(std::string scope, std::string name, const JsonNod
 	if (object->town)
 	{
 		auto & info = object->town->clientInfo;
-		info.icons[0][0] = 8 + object->index * 4 + 0;
-		info.icons[0][1] = 8 + object->index * 4 + 1;
-		info.icons[1][0] = 8 + object->index * 4 + 2;
-		info.icons[1][1] = 8 + object->index * 4 + 3;
+		info.icons[0][0] = 8 + object->index.getNum() * 4 + 0;
+		info.icons[0][1] = 8 + object->index.getNum() * 4 + 1;
+		info.icons[1][0] = 8 + object->index.getNum() * 4 + 2;
+		info.icons[1][1] = 8 + object->index.getNum() * 4 + 3;
 
 		VLC->identifiers()->requestIdentifier(scope, "object", "town", [=](si32 index)
 		{
@@ -1112,7 +1142,7 @@ void CTownHandler::loadObject(std::string scope, std::string name, const JsonNod
 		});
 	}
 
-	registerObject(scope, "faction", name, object->index);
+	registerObject(scope, "faction", name, object->index.getNum());
 }
 
 void CTownHandler::loadObject(std::string scope, std::string name, const JsonNode & data, size_t index)
@@ -1128,10 +1158,10 @@ void CTownHandler::loadObject(std::string scope, std::string name, const JsonNod
 	if (object->town)
 	{
 		auto & info = object->town->clientInfo;
-		info.icons[0][0] = (GameConstants::F_NUMBER + object->index) * 2 + 0;
-		info.icons[0][1] = (GameConstants::F_NUMBER + object->index) * 2 + 1;
-		info.icons[1][0] = object->index * 2 + 0;
-		info.icons[1][1] = object->index * 2 + 1;
+		info.icons[0][0] = (GameConstants::F_NUMBER + object->index.getNum()) * 2 + 0;
+		info.icons[0][1] = (GameConstants::F_NUMBER + object->index.getNum()) * 2 + 1;
+		info.icons[1][0] = object->index.getNum() * 2 + 0;
+		info.icons[1][1] = object->index.getNum() * 2 + 1;
 
 		VLC->identifiers()->requestIdentifier(scope, "object", "town", [=](si32 index)
 		{
@@ -1143,7 +1173,7 @@ void CTownHandler::loadObject(std::string scope, std::string name, const JsonNod
 		});
 	}
 
-	registerObject(scope, "faction", name, object->index);
+	registerObject(scope, "faction", name, object->index.getNum());
 }
 
 void CTownHandler::loadRandomFaction()
@@ -1229,31 +1259,28 @@ void CTownHandler::initializeWarMachines()
 	warMachinesToLoad.clear();
 }
 
-std::vector<bool> CTownHandler::getDefaultAllowed() const
+std::set<FactionID> CTownHandler::getDefaultAllowed() const
 {
-	std::vector<bool> allowedFactions;
-	allowedFactions.reserve(objects.size());
+	std::set<FactionID> allowedFactions;
+
 	for(auto town : objects)
-	{
-		allowedFactions.push_back(town->town != nullptr);
-	}
+		if (town->town != nullptr)
+			allowedFactions.insert(town->getId());
+
 	return allowedFactions;
 }
 
 std::set<FactionID> CTownHandler::getAllowedFactions(bool withTown) const
 {
-	std::set<FactionID> allowedFactions;
-	std::vector<bool> allowed;
 	if (withTown)
-		allowed = getDefaultAllowed();
-	else
-		allowed.resize( objects.size(), true);
+		return getDefaultAllowed();
 
-	for (size_t i=0; i<allowed.size(); i++)
-		if (allowed[i])
-			allowedFactions.insert(static_cast<FactionID>(i));
+	std::set<FactionID> result;
+	for(auto town : objects)
+		result.insert(town->getId());
 
-	return allowedFactions;
+	return result;
+
 }
 
 const std::vector<std::string> & CTownHandler::getTypeNames() const

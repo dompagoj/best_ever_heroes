@@ -89,7 +89,7 @@ class MapView : public QGraphicsView
 public:
 	enum class SelectionTool
 	{
-		None, Brush, Brush2, Brush4, Area, Lasso
+		None, Brush, Brush2, Brush4, Area, Lasso, Line, Fill
 	};
 
 public:
@@ -111,6 +111,7 @@ public slots:
 	
 signals:
 	void openObjectProperties(CGObjectInstance *, bool switchTab);
+	void currentCoordinates(int, int);
 	//void viewportChanged(const QRectF & rect);
 
 protected:
@@ -123,6 +124,8 @@ private:
 	int3 tileStart;
 	int3 tilePrev;
 	bool pressedOnSelected;
+	
+	std::set<int3> temporaryTiles;
 };
 
 class MinimapView : public QGraphicsView

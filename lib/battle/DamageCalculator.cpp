@@ -9,6 +9,7 @@
  */
 
 #include "StdInc.h"
+
 #include "DamageCalculator.h"
 #include "CBattleInfoCallback.h"
 #include "Unit.h"
@@ -52,7 +53,7 @@ DamageRange DamageCalculator::getBaseDamageSingle() const
 	{
 		auto retrieveHeroPrimSkill = [&](PrimarySkill skill) -> int
 		{
-			std::shared_ptr<const Bonus> b = info.attacker->getBonus(Selector::sourceTypeSel(BonusSource::HERO_BASE_SKILL).And(Selector::typeSubtype(BonusType::PRIMARY_SKILL, static_cast<int>(skill))));
+			std::shared_ptr<const Bonus> b = info.attacker->getBonus(Selector::sourceTypeSel(BonusSource::HERO_BASE_SKILL).And(Selector::typeSubtype(BonusType::PRIMARY_SKILL, BonusSubtypeID(skill))));
 			return b ? b->val : 0;
 		};
 
@@ -124,13 +125,28 @@ int DamageCalculator::getActorAttackBase() const
 
 int DamageCalculator::getActorAttackEffective() const
 {
-	return getActorAttackBase() + getActorAttackSlayer();
+	return getActorAttackBase() + getActorAttackSlayer() + getActorAttackIgnored();
+}
+
+int DamageCalculator::getActorAttackIgnored() const
+{
+	int multAttackReductionPercent = battleBonusValue(info.defender, Selector::type()(BonusType::ENEMY_ATTACK_REDUCTION));
+
+	if(multAttackReductionPercent > 0)
+	{
+		int reduction = (getActorAttackBase() * multAttackReductionPercent + 49) / 100; //using ints so 1.5 for 5 attack is rounded down as in HotA / h3assist etc. (keep in mind h3assist 1.2 shows wrong value for 15 attack points and unupg. nix)
+		return -std::min(reduction, getActorAttackBase());
+	}
+	return 0;
 }
 
 int DamageCalculator::getActorAttackSlayer() const
 {
 	const std::string cachingStrSlayer = "type_SLAYER";
 	static const auto selectorSlayer = Selector::type()(BonusType::SLAYER);
+
+	if (!info.defender->hasBonusOfType(BonusType::KING))
+		return 0;
 
 	auto slayerEffects = info.attacker->getBonuses(selectorSlayer, cachingStrSlayer);
 	auto slayerAffected = info.defender->unitType()->valOfBonuses(Selector::type()(BonusType::KING));
@@ -142,8 +158,9 @@ int DamageCalculator::getActorAttackSlayer() const
 
 		if(isAffected)
 		{
-			int attackBonus = SpellID(SpellID::SLAYER).toSpell()->getLevelPower(spLevel);
-			if(info.attacker->hasBonusOfType(BonusType::SPECIAL_PECULIAR_ENCHANT, SpellID::SLAYER))
+			SpellID spell(SpellID::SLAYER);
+			int attackBonus = spell.toSpell()->getLevelPower(spLevel);
+			if(info.attacker->hasBonusOfType(BonusType::SPECIAL_PECULIAR_ENCHANT, BonusSubtypeID(spell)))
 			{
 				ui8 attackerTier = info.attacker->unitType()->getLevel();
 				ui8 specialtyBonus = std::max(5 - attackerTier, 0);
@@ -205,11 +222,11 @@ double DamageCalculator::getAttackOffenseArcheryFactor() const
 	if(info.shooting)
 	{
 		const std::string cachingStrArchery = "type_PERCENTAGE_DAMAGE_BOOSTs_1";
-		static const auto selectorArchery = Selector::typeSubtype(BonusType::PERCENTAGE_DAMAGE_BOOST, 1);
+		static const auto selectorArchery = Selector::typeSubtype(BonusType::PERCENTAGE_DAMAGE_BOOST, BonusCustomSubtype::damageTypeRanged);
 		return info.attacker->valOfBonuses(selectorArchery, cachingStrArchery) / 100.0;
 	}
 	const std::string cachingStrOffence = "type_PERCENTAGE_DAMAGE_BOOSTs_0";
-	static const auto selectorOffence = Selector::typeSubtype(BonusType::PERCENTAGE_DAMAGE_BOOST, 0);
+	static const auto selectorOffence = Selector::typeSubtype(BonusType::PERCENTAGE_DAMAGE_BOOST, BonusCustomSubtype::damageTypeMelee);
 	return info.attacker->valOfBonuses(selectorOffence, cachingStrOffence) / 100.0;
 }
 
@@ -231,7 +248,7 @@ double DamageCalculator::getAttackDoubleDamageFactor() const
 {
 	if(info.doubleDamage) {
 		const auto cachingStr = "type_BONUS_DAMAGE_PERCENTAGEs_" + std::to_string(info.attacker->creatureIndex());
-		const auto selector = Selector::typeSubtype(BonusType::BONUS_DAMAGE_PERCENTAGE, info.attacker->creatureIndex());
+		const auto selector = Selector::typeSubtype(BonusType::BONUS_DAMAGE_PERCENTAGE, BonusSubtypeID(info.attacker->creatureId()));
 		return info.attacker->valOfBonuses(selector, cachingStr) / 100.0;
 	}
 	return 0.0;
@@ -259,7 +276,21 @@ double DamageCalculator::getAttackHateFactor() const
 
 	auto allHateEffects = info.attacker->getBonuses(selectorHate, cachingStrHate);
 
-	return allHateEffects->valOfBonuses(Selector::subtype()(info.defender->creatureIndex())) / 100.0;
+	return allHateEffects->valOfBonuses(Selector::subtype()(BonusSubtypeID(info.defender->creatureId()))) / 100.0;
+}
+
+double DamageCalculator::getAttackRevengeFactor() const
+{
+	if(info.attacker->hasBonusOfType(BonusType::REVENGE)) //HotA Haspid ability
+	{
+		int totalStackCount = info.attacker->unitBaseAmount();
+		int currentStackHealth = info.attacker->getAvailableHealth();
+		int creatureHealth = info.attacker->getMaxHealth();
+
+		return sqrt(static_cast<double>((totalStackCount + 1) * creatureHealth) / (currentStackHealth + creatureHealth) - 1);
+	}
+
+	return 0.0;
 }
 
 double DamageCalculator::getDefenseSkillFactor() const
@@ -281,7 +312,7 @@ double DamageCalculator::getDefenseSkillFactor() const
 double DamageCalculator::getDefenseArmorerFactor() const
 {
 	const std::string cachingStrArmorer = "type_GENERAL_DAMAGE_REDUCTIONs_N1_NsrcSPELL_EFFECT";
-	static const auto selectorArmorer = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, -1).And(Selector::sourceTypeSel(BonusSource::SPELL_EFFECT).Not());
+	static const auto selectorArmorer = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, BonusCustomSubtype::damageTypeAll).And(Selector::sourceTypeSel(BonusSource::SPELL_EFFECT).Not());
 	return info.defender->valOfBonuses(selectorArmorer, cachingStrArmorer) / 100.0;
 
 }
@@ -289,10 +320,10 @@ double DamageCalculator::getDefenseArmorerFactor() const
 double DamageCalculator::getDefenseMagicShieldFactor() const
 {
 	const std::string cachingStrMeleeReduction = "type_GENERAL_DAMAGE_REDUCTIONs_0";
-	static const auto selectorMeleeReduction = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, 0);
+	static const auto selectorMeleeReduction = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, BonusCustomSubtype::damageTypeMelee);
 
 	const std::string cachingStrRangedReduction = "type_GENERAL_DAMAGE_REDUCTIONs_1";
-	static const auto selectorRangedReduction = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, 1);
+	static const auto selectorRangedReduction = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, BonusCustomSubtype::damageTypeRanged);
 
 	//handling spell effects - shield and air shield
 	if(info.shooting)
@@ -312,8 +343,8 @@ double DamageCalculator::getDefenseRangePenaltiesFactor() const
 		auto isAdvancedAirShield = [](const Bonus* bonus)
 		{
 			return bonus->source == BonusSource::SPELL_EFFECT
-					&& bonus->sid == SpellID::AIR_SHIELD
-					&& bonus->val >= SecSkillLevel::ADVANCED;
+					&& bonus->sid == BonusSourceID(SpellID(SpellID::AIR_SHIELD))
+					&& bonus->val >= MasteryLevel::ADVANCED;
 		};
 
 		const bool distPenalty = callback.battleHasDistancePenalty(info.attacker, attackerPos, defenderPos);
@@ -386,7 +417,7 @@ double DamageCalculator::getDefensePetrificationFactor() const
 {
 	// Creatures that are petrified by a Basilisk's Petrifying attack or a Medusa's Stone gaze take 50% damage (R8 = 0.50) from ranged and melee attacks. Taking damage also deactivates the effect.
 	const std::string cachingStrAllReduction = "type_GENERAL_DAMAGE_REDUCTIONs_N1_srcSPELL_EFFECT";
-	static const auto selectorAllReduction = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, -1).And(Selector::sourceTypeSel(BonusSource::SPELL_EFFECT));
+	static const auto selectorAllReduction = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION, BonusCustomSubtype::damageTypeAll).And(Selector::sourceTypeSel(BonusSource::SPELL_EFFECT));
 
 	return info.defender->valOfBonuses(selectorAllReduction, cachingStrAllReduction) / 100.0;
 }
@@ -429,7 +460,8 @@ std::vector<double> DamageCalculator::getAttackFactors() const
 		getAttackJoustingFactor(),
 		getAttackDeathBlowFactor(),
 		getAttackDoubleDamageFactor(),
-		getAttackHateFactor()
+		getAttackHateFactor(),
+		getAttackRevengeFactor()
 	};
 }
 
@@ -499,12 +531,10 @@ DamageEstimation DamageCalculator::calculateDmgRange() const
 	for (auto & factor : defenseFactors)
 	{
 		assert(factor >= 0.0);
-		defenseFactorTotal *= ( 1 - std::min(1.0, factor));
+		defenseFactorTotal *= (1 - std::min(1.0, factor));
 	}
 
-	double resultingFactor = std::min(8.0, attackFactorTotal) * std::max( 0.01, defenseFactorTotal);
-
-	info.defender->getTotalHealth();
+	double resultingFactor = attackFactorTotal * defenseFactorTotal;
 
 	DamageRange damageDealt {
 		std::max<int64_t>( 1.0, std::floor(damageBase.min * resultingFactor)),

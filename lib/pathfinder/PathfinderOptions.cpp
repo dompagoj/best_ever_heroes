@@ -21,6 +21,7 @@ VCMI_LIB_NAMESPACE_BEGIN
 PathfinderOptions::PathfinderOptions()
 	: useFlying(true)
 	, useWaterWalking(true)
+	, ignoreGuards(VLC->settings()->getBoolean(EGameSettings::PATHFINDER_IGNORE_GUARDS))
 	, useEmbarkAndDisembark(VLC->settings()->getBoolean(EGameSettings::PATHFINDER_USE_BOAT))
 	, useTeleportTwoWay(VLC->settings()->getBoolean(EGameSettings::PATHFINDER_USE_MONOLITH_TWO_WAY))
 	, useTeleportOneWay(VLC->settings()->getBoolean(EGameSettings::PATHFINDER_USE_MONOLITH_ONE_WAY_UNIQUE))
@@ -31,6 +32,7 @@ PathfinderOptions::PathfinderOptions()
 	, oneTurnSpecialLayersLimit(true)
 	, originalMovementRules(false)
 	, turnLimit(std::numeric_limits<uint8_t>::max())
+	, canUseCast(false)
 {
 }
 

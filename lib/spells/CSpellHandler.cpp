@@ -42,19 +42,19 @@ static const std::string LEVEL_NAMES[] = {"none", "basic", "advanced", "expert"}
 const spells::SchoolInfo SCHOOL[4] =
 {
 	{
-		ESpellSchool::AIR,
+		SpellSchool::AIR,
 		"air"
 	},
 	{
-		ESpellSchool::FIRE,
+		SpellSchool::FIRE,
 		"fire"
 	},
 	{
-		ESpellSchool::WATER,
+		SpellSchool::WATER,
 		"water"
 	},
 	{
-		ESpellSchool::EARTH,
+		SpellSchool::EARTH,
 		"earth"
 	}
 };
@@ -62,10 +62,10 @@ const spells::SchoolInfo SCHOOL[4] =
 //order as described in http://bugs.vcmi.eu/view.php?id=91
 static const SpellSchool SCHOOL_ORDER[4] =
 {
-	ESpellSchool::AIR,  //=0
-	ESpellSchool::FIRE, //=1
-	ESpellSchool::EARTH,//=3(!)
-	ESpellSchool::WATER //=2(!)
+	SpellSchool::AIR,  //=0
+	SpellSchool::FIRE, //=1
+	SpellSchool::EARTH,//=3(!)
+	SpellSchool::WATER //=2(!)
 };
 } //namespace SpellConfig
 
@@ -76,6 +76,7 @@ CSpell::CSpell():
 	power(0),
 	combat(false),
 	creatureAbility(false),
+	castOnSelf(false),
 	positiveness(ESpellPositiveness::NEUTRAL),
 	defaultProbability(0),
 	rising(false),
@@ -107,8 +108,8 @@ const CSpell::LevelInfo & CSpell::getLevelInfo(const int32_t level) const
 {
 	if(level < 0 || level >= GameConstants::SPELL_SCHOOL_LEVELS)
 	{
-		logGlobal->error("CSpell::getLevelInfo: invalid school level %d", level);
-		return levels.at(0);
+		logGlobal->error("CSpell::getLevelInfo: invalid school mastery level %d", level);
+		return levels.at(MasteryLevel::EXPERT);
 	}
 
 	return levels.at(level);
@@ -154,7 +155,7 @@ void CSpell::forEachSchool(const std::function<void(const SpellSchool &, bool &)
 	bool stop = false;
 	for(auto iter : SpellConfig::SCHOOL_ORDER)
 	{
-		const spells::SchoolInfo & cnf = SpellConfig::SCHOOL[iter];
+		const spells::SchoolInfo & cnf = SpellConfig::SCHOOL[iter.getNum()];
 		if(school.at(cnf.id))
 		{
 			cb(cnf.id, stop);
@@ -285,6 +286,11 @@ bool CSpell::hasBattleEffects() const
 	return levels[0].battleEffects.getType() == JsonNode::JsonType::DATA_STRUCT && !levels[0].battleEffects.Struct().empty();
 }
 
+bool CSpell::canCastOnSelf() const
+{
+	return castOnSelf;
+}
+
 const std::string & CSpell::getIconImmune() const
 {
 	return iconImmune;
@@ -383,15 +389,15 @@ int64_t CSpell::adjustRawDamage(const spells::Caster * caster, const battle::Uni
 		//applying protections - when spell has more then one elements, only one protection should be applied (I think)
 		forEachSchool([&](const SpellSchool & cnf, bool & stop)
 		{
-			if(bearer->hasBonusOfType(BonusType::SPELL_DAMAGE_REDUCTION, cnf))
+			if(bearer->hasBonusOfType(BonusType::SPELL_DAMAGE_REDUCTION, BonusSubtypeID(cnf)))
 			{
-				ret *= 100 - bearer->valOfBonuses(BonusType::SPELL_DAMAGE_REDUCTION, cnf);
+				ret *= 100 - bearer->valOfBonuses(BonusType::SPELL_DAMAGE_REDUCTION, BonusSubtypeID(cnf));
 				ret /= 100;
 				stop = true; //only bonus from one school is used
 			}
 		});
 
-		CSelector selector = Selector::typeSubtype(BonusType::SPELL_DAMAGE_REDUCTION, SpellSchool(ESpellSchool::ANY));
+		CSelector selector = Selector::typeSubtype(BonusType::SPELL_DAMAGE_REDUCTION, BonusSubtypeID(SpellSchool::ANY));
 		auto cachingStr = "type_SPELL_DAMAGE_REDUCTION_s_ANY";
 
 		//general spell dmg reduction, works only on magical effects
@@ -402,9 +408,9 @@ int64_t CSpell::adjustRawDamage(const spells::Caster * caster, const battle::Uni
 		}
 
 		//dmg increasing
-		if(bearer->hasBonusOfType(BonusType::MORE_DAMAGE_FROM_SPELL, id))
+		if(bearer->hasBonusOfType(BonusType::MORE_DAMAGE_FROM_SPELL, BonusSubtypeID(id)))
 		{
-			ret *= 100 + bearer->valOfBonuses(BonusType::MORE_DAMAGE_FROM_SPELL, id.toEnum());
+			ret *= 100 + bearer->valOfBonuses(BonusType::MORE_DAMAGE_FROM_SPELL, BonusSubtypeID(id));
 			ret /= 100;
 		}
 	}
@@ -702,6 +708,7 @@ CSpell * CSpellHandler::loadFromJson(const std::string & scope, const JsonNode &
 		spell->school[info.id] = schoolNames[info.jsonName].Bool();
 	}
 
+	spell->castOnSelf = json["canCastOnSelf"].Bool();
 	spell->level = static_cast<si32>(json["level"].Integer());
 	spell->power = static_cast<si32>(json["power"].Integer());
 
@@ -925,7 +932,7 @@ CSpell * CSpellHandler::loadFromJson(const std::string & scope, const JsonNode &
 			auto b = JsonUtils::parseBonus(bonusNode);
 			const bool usePowerAsValue = bonusNode["val"].isNull();
 
-			b->sid = spell->id; //for all
+			b->sid = BonusSourceID(spell->id); //for all
 			b->source = BonusSource::SPELL_EFFECT;//for all
 
 			if(usePowerAsValue)
@@ -940,7 +947,7 @@ CSpell * CSpellHandler::loadFromJson(const std::string & scope, const JsonNode &
 			auto b = JsonUtils::parseBonus(bonusNode);
 			const bool usePowerAsValue = bonusNode["val"].isNull();
 
-			b->sid = spell->id; //for all
+			b->sid = BonusSourceID(spell->id); //for all
 			b->source = BonusSource::SPELL_EFFECT;//for all
 
 			if(usePowerAsValue)
@@ -962,7 +969,7 @@ CSpell * CSpellHandler::loadFromJson(const std::string & scope, const JsonNode &
 
 void CSpellHandler::afterLoadFinalization()
 {
-	for(auto spell : objects)
+	for(auto & spell : objects)
 	{
 		spell->setupMechanics();
 	}
@@ -986,15 +993,13 @@ void CSpellHandler::beforeValidate(JsonNode & object)
 	inheritNode("expert");
 }
 
-std::vector<bool> CSpellHandler::getDefaultAllowed() const
+std::set<SpellID> CSpellHandler::getDefaultAllowed() const
 {
-	std::vector<bool> allowedSpells;
-	allowedSpells.reserve(objects.size());
+	std::set<SpellID> allowedSpells;
 
-	for(const CSpell * s : objects)
-	{
-		allowedSpells.push_back( !(s->isSpecial() || s->isCreatureAbility()));
-	}
+	for(auto const & s : objects)
+		if (!s->isSpecial() && !s->isCreatureAbility())
+			allowedSpells.insert(s->getId());
 
 	return allowedSpells;
 }

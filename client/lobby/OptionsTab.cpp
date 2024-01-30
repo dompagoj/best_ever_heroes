@@ -34,7 +34,7 @@
 #include "../eventsSDL/InputHandler.h"
 
 #include "../../lib/filesystem/Filesystem.h"
-#include "../../lib/NetPacksLobby.h"
+#include "../../lib/networkPacks/PacksForLobby.h"
 #include "../../lib/CGeneralTextHandler.h"
 #include "../../lib/CArtHandler.h"
 #include "../../lib/CTownHandler.h"
@@ -42,164 +42,18 @@
 #include "../../lib/mapping/CMapInfo.h"
 #include "../../lib/mapping/CMapHeader.h"
 
-OptionsTab::OptionsTab() : humanPlayers(0)
+static JsonPath optionsTabConfigLocation()
 {
-	recActions = 0;
-		
-	addCallback("setTimerPreset", [&](int index){
-		if(!variables["timerPresets"].isNull())
-		{
-			auto tpreset = variables["timerPresets"].Vector().at(index).Vector();
-			TurnTimerInfo tinfo;
-			tinfo.baseTimer = tpreset.at(0).Integer() * 1000;
-			tinfo.turnTimer = tpreset.at(1).Integer() * 1000;
-			tinfo.battleTimer = tpreset.at(2).Integer() * 1000;
-			tinfo.creatureTimer = tpreset.at(3).Integer() * 1000;
-			CSH->setTurnTimerInfo(tinfo);
-		}
-	});
+	if(settings["general"]["enableUiEnhancements"].Bool())
+		return JsonPath::builtin("config/widgets/playerOptionsTab.json");
+	else
+		return JsonPath::builtin("config/widgets/advancedOptionsTab.json");
+}
 
-	addCallback("setSimturnDuration", [&](int index){
-		SimturnsInfo info;
-		info.optionalTurns = index;
-		CSH->setSimturnsInfo(info);
-	});
-	
-	//helper function to parse string containing time to integer reflecting time in seconds
-	//assumed that input string can be modified by user, function shall support user's intention
-	// normal: 2:00, 12:30
-	// adding symbol: 2:005 -> 2:05, 2:305 -> 23:05,
-	// adding symbol (>60 seconds): 12:095 -> 129:05
-	// removing symbol: 129:0 -> 12:09, 2:0 -> 0:20, 0:2 -> 0:02
-	auto parseTimerString = [](const std::string & str) -> int
-	{
-		auto sc = str.find(":");
-		if(sc == std::string::npos)
-			return str.empty() ? 0 : std::stoi(str);
-		
-		auto l = str.substr(0, sc);
-		auto r = str.substr(sc + 1, std::string::npos);
-		if(r.length() == 3) //symbol added
-		{
-			l.push_back(r.front());
-			r.erase(r.begin());
-		}
-		else if(r.length() == 1) //symbol removed
-		{
-			r.insert(r.begin(), l.back());
-			l.pop_back();
-		}
-		else if(r.empty())
-			r = "0";
-		
-		int sec = std::stoi(r);
-		if(sec >= 60)
-		{
-			if(l.empty()) //9:00 -> 0:09
-				return sec / 10;
-			
-			l.push_back(r.front()); //0:090 -> 9:00
-			r.erase(r.begin());
-		}
-		else if(l.empty())
-			return sec;
-		
-		return std::stoi(l) * 60 + std::stoi(r);
-	};
-	
-	addCallback("parseAndSetTimer_base", [parseTimerString](const std::string & str){
-		int time = parseTimerString(str) * 1000;
-		if(time >= 0)
-		{
-			TurnTimerInfo tinfo = SEL->getStartInfo()->turnTimerInfo;
-			tinfo.baseTimer = time;
-			CSH->setTurnTimerInfo(tinfo);
-		}
-	});
-	addCallback("parseAndSetTimer_turn", [parseTimerString](const std::string & str){
-		int time = parseTimerString(str) * 1000;
-		if(time >= 0)
-		{
-			TurnTimerInfo tinfo = SEL->getStartInfo()->turnTimerInfo;
-			tinfo.turnTimer = time;
-			CSH->setTurnTimerInfo(tinfo);
-		}
-	});
-	addCallback("parseAndSetTimer_battle", [parseTimerString](const std::string & str){
-		int time = parseTimerString(str) * 1000;
-		if(time >= 0)
-		{
-			TurnTimerInfo tinfo = SEL->getStartInfo()->turnTimerInfo;
-			tinfo.battleTimer = time;
-			CSH->setTurnTimerInfo(tinfo);
-		}
-	});
-	addCallback("parseAndSetTimer_creature", [parseTimerString](const std::string & str){
-		int time = parseTimerString(str) * 1000;
-		if(time >= 0)
-		{
-			TurnTimerInfo tinfo = SEL->getStartInfo()->turnTimerInfo;
-			tinfo.creatureTimer = time;
-			CSH->setTurnTimerInfo(tinfo);
-		}
-	});
-	
-	const JsonNode config(JsonPath::builtin("config/widgets/optionsTab.json"));
-	build(config);
-	
-	//set timers combo box callbacks
-	if(auto w = widget<ComboBox>("timerModeSwitch"))
-	{
-		w->onConstructItems = [&](std::vector<const void *> & curItems){
-			if(variables["timers"].isNull())
-				return;
-			
-			for(auto & p : variables["timers"].Vector())
-			{
-				curItems.push_back(&p);
-			}
-		};
-		
-		w->onSetItem = [&](const void * item){
-			if(item)
-			{
-				if(auto * tObj = reinterpret_cast<const JsonNode *>(item))
-				{
-					for(auto wname : (*tObj)["hideWidgets"].Vector())
-					{
-						if(auto w = widget<CIntObject>(wname.String()))
-							w->setEnabled(false);
-					}
-					for(auto wname : (*tObj)["showWidgets"].Vector())
-					{
-						if(auto w = widget<CIntObject>(wname.String()))
-							w->setEnabled(true);
-					}
-					if((*tObj)["default"].isVector())
-					{
-						TurnTimerInfo tinfo;
-						tinfo.baseTimer = (*tObj)["default"].Vector().at(0).Integer() * 1000;
-						tinfo.turnTimer = (*tObj)["default"].Vector().at(1).Integer() * 1000;
-						tinfo.battleTimer = (*tObj)["default"].Vector().at(2).Integer() * 1000;
-						tinfo.creatureTimer = (*tObj)["default"].Vector().at(3).Integer() * 1000;
-						CSH->setTurnTimerInfo(tinfo);
-					}
-				}
-				redraw();
-			}
-		};
-		
-		w->getItemText = [this](int idx, const void * item){
-			if(item)
-			{
-				if(auto * tObj = reinterpret_cast<const JsonNode *>(item))
-					return readText((*tObj)["text"]);
-			}
-			return std::string("");
-		};
-		
-		w->setItem(0);
-	}
+OptionsTab::OptionsTab()
+	: OptionsTabBase(optionsTabConfigLocation())
+	, humanPlayers(0)
+{
 }
 
 void OptionsTab::recreate()
@@ -221,64 +75,7 @@ void OptionsTab::recreate()
 		entries.insert(std::make_pair(pInfo.first, std::make_shared<PlayerOptionsEntry>(pInfo.second, * this)));
 	}
 
-	//Simultaneous turns
-	if(auto turnSlider = widget<CSlider>("labelSimturnsDurationValue"))
-		turnSlider->scrollTo(SEL->getStartInfo()->simturnsInfo.optionalTurns);
-
-	if(auto w = widget<CLabel>("labelSimturnsDurationValue"))
-	{
-		MetaString message;
-		message.appendRawString("Simturns: up to %d days");
-		message.replaceNumber(SEL->getStartInfo()->simturnsInfo.optionalTurns);
-		w->setText(message.toString());
-	}
-	
-	const auto & turnTimerRemote = SEL->getStartInfo()->turnTimerInfo;
-	
-	//classic timer
-	if(auto turnSlider = widget<CSlider>("sliderTurnDuration"))
-	{
-		if(!variables["timerPresets"].isNull() && !turnTimerRemote.battleTimer && !turnTimerRemote.creatureTimer && !turnTimerRemote.baseTimer)
-		{
-			for(int idx = 0; idx < variables["timerPresets"].Vector().size(); ++idx)
-			{
-				auto & tpreset = variables["timerPresets"].Vector()[idx];
-				if(tpreset.Vector().at(1).Integer() == turnTimerRemote.turnTimer / 1000)
-				{
-					turnSlider->scrollTo(idx);
-					if(auto w = widget<CLabel>("labelTurnDurationValue"))
-						w->setText(CGI->generaltexth->turnDurations[idx]);
-				}
-			}
-		}
-	}
-	
-	//chess timer
-	auto timeToString = [](int time) -> std::string
-	{
-		std::stringstream ss;
-		ss << time / 1000 / 60 << ":" << std::setw(2) << std::setfill('0') << time / 1000 % 60;
-		return ss.str();
-	};
-	
-	if(auto ww = widget<CTextInput>("chessFieldBase"))
-		ww->setText(timeToString(turnTimerRemote.baseTimer), false);
-	if(auto ww = widget<CTextInput>("chessFieldTurn"))
-		ww->setText(timeToString(turnTimerRemote.turnTimer), false);
-	if(auto ww = widget<CTextInput>("chessFieldBattle"))
-		ww->setText(timeToString(turnTimerRemote.battleTimer), false);
-	if(auto ww = widget<CTextInput>("chessFieldCreature"))
-		ww->setText(timeToString(turnTimerRemote.creatureTimer), false);
-	
-	if(auto w = widget<ComboBox>("timerModeSwitch"))
-	{
-		if(turnTimerRemote.battleTimer || turnTimerRemote.creatureTimer || turnTimerRemote.baseTimer)
-		{
-			if(auto turnSlider = widget<CSlider>("sliderTurnDuration"))
-				if(turnSlider->isActive())
-					w->setItem(1);
-		}
-	}
+	OptionsTabBase::recreate();
 }
 
 size_t OptionsTab::CPlayerSettingsHelper::getImageIndex(bool big)
@@ -291,48 +88,49 @@ size_t OptionsTab::CPlayerSettingsHelper::getImageIndex(bool big)
 		WOOD = 0,       ORE     = 0,    MITHRIL = 10, // resources unavailable in bonuses file
 
 		TOWN_RANDOM = 38,  TOWN_NONE = 39, // Special frames in ITPA
-		HERO_RANDOM = 163, HERO_NONE = 164 // Special frames in PortraitsSmall
+		HERO_RANDOM = 156, HERO_NONE = 157 // Special frames in PortraitsSmall
 	};
-	auto factionIndex = playerSettings.castle.getNum() >= CGI->townh->size() ? 0 : playerSettings.castle.getNum();
+	auto factionIndex = playerSettings.getCastleValidated();
 
-	switch(type)
+	switch(selectionType)
 	{
 	case TOWN:
-		switch(playerSettings.castle)
-		{
-		case PlayerSettings::NONE:
+	{
+		if (playerSettings.castle == FactionID::NONE)
 			return TOWN_NONE;
-		case PlayerSettings::RANDOM:
+
+		if (playerSettings.castle == FactionID::RANDOM)
 			return TOWN_RANDOM;
-		default:
-			return (*CGI->townh)[factionIndex]->town->clientInfo.icons[true][false] + (big ? 0 : 2);
-		}
+
+		return (*CGI->townh)[factionIndex]->town->clientInfo.icons[true][false] + (big ? 0 : 2);
+	}
+
 	case HERO:
-		switch(playerSettings.hero)
-		{
-		case PlayerSettings::NONE:
+	{
+		if (playerSettings.hero == HeroTypeID::NONE)
 			return HERO_NONE;
-		case PlayerSettings::RANDOM:
+
+		if (playerSettings.hero == HeroTypeID::RANDOM)
 			return HERO_RANDOM;
-		default:
-		{
-			if(playerSettings.heroPortrait != HeroTypeID::NONE)
-				return playerSettings.heroPortrait;
-			auto index = playerSettings.hero.getNum() >= CGI->heroh->size() ? 0 : playerSettings.hero.getNum();
-			return (*CGI->heroh)[index]->imageIndex;
-		}
-		}
+
+		if(playerSettings.heroPortrait != HeroTypeID::NONE)
+			return playerSettings.heroPortrait;
+
+		auto index = playerSettings.getHeroValidated();
+		return (*CGI->heroh)[index]->imageIndex;
+	}
+
 	case BONUS:
 	{
 		switch(playerSettings.bonus)
 		{
-		case PlayerSettings::RANDOM:
+		case PlayerStartingBonus::RANDOM:
 			return RANDOM;
-		case PlayerSettings::ARTIFACT:
+		case PlayerStartingBonus::ARTIFACT:
 			return ARTIFACT;
-		case PlayerSettings::GOLD:
+		case PlayerStartingBonus::GOLD:
 			return GOLD;
-		case PlayerSettings::RESOURCE:
+		case PlayerStartingBonus::RESOURCE:
 		{
 			switch((*CGI->townh)[factionIndex]->town->primaryRes.toEnum())
 			{
@@ -364,7 +162,7 @@ size_t OptionsTab::CPlayerSettingsHelper::getImageIndex(bool big)
 
 AnimationPath OptionsTab::CPlayerSettingsHelper::getImageName(bool big)
 {
-	switch(type)
+	switch(selectionType)
 	{
 	case OptionsTab::TOWN:
 		return AnimationPath::builtin(big ? "ITPt": "ITPA");
@@ -378,50 +176,39 @@ AnimationPath OptionsTab::CPlayerSettingsHelper::getImageName(bool big)
 
 std::string OptionsTab::CPlayerSettingsHelper::getName()
 {
-	switch(type)
+	switch(selectionType)
 	{
-	case TOWN:
-	{
-		switch(playerSettings.castle)
+		case TOWN:
 		{
-		case PlayerSettings::NONE:
-			return CGI->generaltexth->allTexts[523];
-		case PlayerSettings::RANDOM:
-			return CGI->generaltexth->allTexts[522];
-		default:
-		{
-			auto factionIndex = playerSettings.castle.getNum() >= CGI->townh->size() ? 0 : playerSettings.castle.getNum();
+			if (playerSettings.castle == FactionID::NONE)
+				return CGI->generaltexth->allTexts[523];
+
+			if (playerSettings.castle == FactionID::RANDOM)
+				return CGI->generaltexth->allTexts[522];
+
+			auto factionIndex = playerSettings.getCastleValidated();
 			return (*CGI->townh)[factionIndex]->getNameTranslated();
 		}
-	}
-	}
-	case HERO:
-	{
-		switch(playerSettings.hero)
+		case HERO:
 		{
-		case PlayerSettings::NONE:
-			return CGI->generaltexth->allTexts[523];
-		case PlayerSettings::RANDOM:
-			return CGI->generaltexth->allTexts[522];
-		default:
-		{
-			if(!playerSettings.heroName.empty())
-				return playerSettings.heroName;
-			auto index = playerSettings.hero.getNum() >= CGI->heroh->size() ? 0 : playerSettings.hero.getNum();
+			if (playerSettings.hero == HeroTypeID::NONE)
+				return CGI->generaltexth->allTexts[523];
+
+			if (playerSettings.hero == HeroTypeID::RANDOM)
+					return CGI->generaltexth->allTexts[522];
+
+			if(!playerSettings.heroNameTextId.empty())
+				return CGI->generaltexth->translate(playerSettings.heroNameTextId);
+			auto index = playerSettings.getHeroValidated();
 			return (*CGI->heroh)[index]->getNameTranslated();
 		}
-		}
-	}
-	case BONUS:
-	{
-		switch(playerSettings.bonus)
+		case BONUS:
 		{
-		case PlayerSettings::RANDOM:
-			return CGI->generaltexth->allTexts[522];
-		default:
-			return CGI->generaltexth->arraytxt[214 + playerSettings.bonus];
+			if (playerSettings.bonus == PlayerStartingBonus::RANDOM)
+					return CGI->generaltexth->allTexts[522];
+
+			return CGI->generaltexth->arraytxt[214 + static_cast<int>(playerSettings.bonus)];
 		}
-	}
 	}
 	return "";
 }
@@ -429,23 +216,23 @@ std::string OptionsTab::CPlayerSettingsHelper::getName()
 
 std::string OptionsTab::CPlayerSettingsHelper::getTitle()
 {
-	switch(type)
+	switch(selectionType)
 	{
 	case OptionsTab::TOWN:
-		return (playerSettings.castle.getNum() < 0) ? CGI->generaltexth->allTexts[103] : CGI->generaltexth->allTexts[80];
+		return playerSettings.castle.isValid() ? CGI->generaltexth->allTexts[80] : CGI->generaltexth->allTexts[103];
 	case OptionsTab::HERO:
-		return (playerSettings.hero.getNum() < 0) ? CGI->generaltexth->allTexts[101] : CGI->generaltexth->allTexts[77];
+		return playerSettings.hero.isValid() ? CGI->generaltexth->allTexts[77] : CGI->generaltexth->allTexts[101];
 	case OptionsTab::BONUS:
 	{
 		switch(playerSettings.bonus)
 		{
-		case PlayerSettings::RANDOM:
+		case PlayerStartingBonus::RANDOM:
 			return CGI->generaltexth->allTexts[86]; //{Random Bonus}
-		case PlayerSettings::ARTIFACT:
+		case PlayerStartingBonus::ARTIFACT:
 			return CGI->generaltexth->allTexts[83]; //{Artifact Bonus}
-		case PlayerSettings::GOLD:
+		case PlayerStartingBonus::GOLD:
 			return CGI->generaltexth->allTexts[84]; //{Gold Bonus}
-		case PlayerSettings::RESOURCE:
+		case PlayerStartingBonus::RESOURCE:
 			return CGI->generaltexth->allTexts[85]; //{Resource Bonus}
 		}
 	}
@@ -454,16 +241,16 @@ std::string OptionsTab::CPlayerSettingsHelper::getTitle()
 }
 std::string OptionsTab::CPlayerSettingsHelper::getSubtitle()
 {
-	auto factionIndex = playerSettings.castle.getNum() >= CGI->townh->size() ? 0 : playerSettings.castle.getNum();
-	auto heroIndex = playerSettings.hero.getNum() >= CGI->heroh->size() ? 0 : playerSettings.hero.getNum();
+	auto factionIndex = playerSettings.getCastleValidated();
+	auto heroIndex = playerSettings.getHeroValidated();
 
-	switch(type)
+	switch(selectionType)
 	{
 	case TOWN:
 		return getName();
 	case HERO:
 	{
-		if(playerSettings.hero.getNum() >= 0)
+		if(playerSettings.hero.isValid())
 			return getName() + " - " + (*CGI->heroh)[heroIndex]->heroClass->getNameTranslated();
 		return getName();
 	}
@@ -472,9 +259,9 @@ std::string OptionsTab::CPlayerSettingsHelper::getSubtitle()
 	{
 		switch(playerSettings.bonus)
 		{
-		case PlayerSettings::GOLD:
+		case PlayerStartingBonus::GOLD:
 			return CGI->generaltexth->allTexts[87]; //500-1000
-		case PlayerSettings::RESOURCE:
+		case PlayerStartingBonus::RESOURCE:
 		{
 			switch((*CGI->townh)[factionIndex]->town->primaryRes.toEnum())
 			{
@@ -498,9 +285,9 @@ std::string OptionsTab::CPlayerSettingsHelper::getSubtitle()
 
 std::string OptionsTab::CPlayerSettingsHelper::getDescription()
 {
-	auto factionIndex = playerSettings.castle.getNum() >= CGI->townh->size() ? 0 : playerSettings.castle.getNum();
+	auto factionIndex = playerSettings.getCastleValidated();
 
-	switch(type)
+	switch(selectionType)
 	{
 	case TOWN:
 		return CGI->generaltexth->allTexts[104];
@@ -510,13 +297,13 @@ std::string OptionsTab::CPlayerSettingsHelper::getDescription()
 	{
 		switch(playerSettings.bonus)
 		{
-		case PlayerSettings::RANDOM:
+		case PlayerStartingBonus::RANDOM:
 			return CGI->generaltexth->allTexts[94]; //Gold, wood and ore, or an artifact is randomly chosen as your starting bonus
-		case PlayerSettings::ARTIFACT:
+		case PlayerStartingBonus::ARTIFACT:
 			return CGI->generaltexth->allTexts[90]; //An artifact is randomly chosen and equipped to your starting hero
-		case PlayerSettings::GOLD:
+		case PlayerStartingBonus::GOLD:
 			return CGI->generaltexth->allTexts[92]; //At the start of the game, 500-1000 gold is added to your Kingdom's resource pool
-		case PlayerSettings::RESOURCE:
+		case PlayerStartingBonus::RESOURCE:
 		{
 			switch((*CGI->townh)[factionIndex]->town->primaryRes.toEnum())
 			{
@@ -543,29 +330,18 @@ OptionsTab::CPlayerOptionTooltipBox::CPlayerOptionTooltipBox(CPlayerSettingsHelp
 {
 	OBJ_CONSTRUCTION_CAPTURING_ALL_NO_DISPOSE;
 
-	int value = PlayerSettings::NONE;
-
-	switch(CPlayerSettingsHelper::type)
+	switch(selectionType)
 	{
-		break;
-	case TOWN:
-		value = playerSettings.castle;
-		break;
-	case HERO:
-		value = playerSettings.hero;
-		break;
-	case BONUS:
-		value = playerSettings.bonus;
+		case TOWN:
+			genTownWindow();
+			break;
+		case HERO:
+			genHeroWindow();
+			break;
+		case BONUS:
+			genBonusWindow();
+			break;
 	}
-
-	if(value == PlayerSettings::RANDOM)
-		genBonusWindow();
-	else if(CPlayerSettingsHelper::type == BONUS)
-		genBonusWindow();
-	else if(CPlayerSettingsHelper::type == HERO)
-		genHeroWindow();
-	else if(CPlayerSettingsHelper::type == TOWN)
-		genTownWindow();
 
 	center();
 }
@@ -582,27 +358,35 @@ void OptionsTab::CPlayerOptionTooltipBox::genHeader()
 
 void OptionsTab::CPlayerOptionTooltipBox::genTownWindow()
 {
+	auto factionIndex = playerSettings.getCastleValidated();
+
+	if (playerSettings.castle == FactionID::RANDOM)
+		return genBonusWindow();
+
 	pos = Rect(0, 0, 228, 290);
 	genHeader();
 	labelAssociatedCreatures = std::make_shared<CLabel>(pos.w / 2 + 8, 122, FONT_MEDIUM, ETextAlignment::CENTER, Colors::YELLOW, CGI->generaltexth->allTexts[79]);
-	auto factionIndex = playerSettings.castle.getNum() >= CGI->townh->size() ? 0 : playerSettings.castle.getNum();
 	std::vector<std::shared_ptr<CComponent>> components;
 	const CTown * town = (*CGI->townh)[factionIndex]->town;
 
 	for(auto & elem : town->creatures)
 	{
 		if(!elem.empty())
-			components.push_back(std::make_shared<CComponent>(CComponent::creature, elem.front(), 0, CComponent::tiny));
+			components.push_back(std::make_shared<CComponent>(ComponentType::CREATURE, elem.front(), std::nullopt, CComponent::tiny));
 	}
 	boxAssociatedCreatures = std::make_shared<CComponentBox>(components, Rect(10, 140, pos.w - 20, 140));
 }
 
 void OptionsTab::CPlayerOptionTooltipBox::genHeroWindow()
 {
+	auto heroIndex = playerSettings.getHeroValidated();
+
+	if (playerSettings.hero == HeroTypeID::RANDOM)
+		return genBonusWindow();
+
 	pos = Rect(0, 0, 292, 226);
 	genHeader();
 	labelHeroSpeciality = std::make_shared<CLabel>(pos.w / 2 + 4, 117, FONT_MEDIUM, ETextAlignment::CENTER, Colors::YELLOW, CGI->generaltexth->allTexts[78]);
-	auto heroIndex = playerSettings.hero.getNum() >= CGI->heroh->size() ? 0 : playerSettings.hero.getNum();
 
 	imageSpeciality = std::make_shared<CAnimImage>(AnimationPath::builtin("UN44"), (*CGI->heroh)[heroIndex]->imageIndex, 0, pos.w / 2 - 22, 134);
 	labelSpecialityName = std::make_shared<CLabel>(pos.w / 2, 188, FONT_SMALL, ETextAlignment::CENTER, Colors::WHITE, (*CGI->heroh)[heroIndex]->getSpecialtyNameTranslated());
@@ -616,12 +400,11 @@ void OptionsTab::CPlayerOptionTooltipBox::genBonusWindow()
 	textBonusDescription = std::make_shared<CTextBox>(getDescription(), Rect(10, 100, pos.w - 20, 70), 0, FONT_SMALL, ETextAlignment::CENTER, Colors::WHITE);
 }
 
-OptionsTab::SelectionWindow::SelectionWindow(PlayerColor _color, SelType _type)
-	: CWindowObject(BORDERED)
+OptionsTab::SelectionWindow::SelectionWindow(const PlayerColor & color, SelType _type)
+	: CWindowObject(BORDERED), color(color)
 {
 	addUsedEvents(LCLICK | SHOW_POPUP);
 
-	color = _color;
 	type = _type;
 
 	initialFaction = SEL->getStartInfo()->playerInfos.find(color)->second.castle;
@@ -630,24 +413,24 @@ OptionsTab::SelectionWindow::SelectionWindow(PlayerColor _color, SelType _type)
 	selectedFaction = initialFaction;
 	selectedHero = initialHero;
 	selectedBonus = initialBonus;
-	allowedFactions = SEL->getPlayerInfo(color.getNum()).allowedFactions;
-	std::vector<bool> allowedHeroesFlag = SEL->getMapInfo()->mapHeader->allowedHeroes;
-	for(int i = 0; i < allowedHeroesFlag.size(); i++)
-		if(allowedHeroesFlag[i])
-			allowedHeroes.insert(HeroTypeID(i));
+	allowedFactions = SEL->getPlayerInfo(color).allowedFactions;
+	allowedHeroes = SEL->getMapInfo()->mapHeader->allowedHeroes;
 
 	for(auto & player : SEL->getStartInfo()->playerInfos)
 	{
-		if(player.first != color && (int)player.second.hero > PlayerSettings::RANDOM)
+		if(player.first != color && (int)player.second.hero > HeroTypeID::RANDOM)
 			unusableHeroes.insert(player.second.hero);
 	}
 
-	allowedBonus.push_back(-1); // random
-	if(initialHero.getNum() >= -1 || SEL->getPlayerInfo(color.getNum()).heroesNames.size() > 0)
-		allowedBonus.push_back(0); // artifact
-	allowedBonus.push_back(1); // gold
-	if(initialFaction.getNum() >= 0)
-		allowedBonus.push_back(2); // resource
+	allowedBonus.push_back(PlayerStartingBonus::RANDOM);
+
+	if(initialHero != HeroTypeID::NONE|| SEL->getPlayerInfo(color).heroesNames.size() > 0)
+		allowedBonus.push_back(PlayerStartingBonus::ARTIFACT);
+
+	allowedBonus.push_back(PlayerStartingBonus::GOLD);
+
+	if(initialFaction.isValid())
+		allowedBonus.push_back(PlayerStartingBonus::RESOURCE);
 
 	recreate();
 }
@@ -656,7 +439,7 @@ int OptionsTab::SelectionWindow::calcLines(FactionID faction)
 {
 	double additionalItems = 1; // random
 
-	if(faction.getNum() < 0)
+	if(!faction.isValid())
 		return std::ceil(((double)allowedFactions.size() + additionalItems) / elementsPerLine);
 
 	int count = 0;
@@ -692,14 +475,15 @@ void OptionsTab::SelectionWindow::setSelection()
 		CSH->setPlayerOption(LobbyChangePlayerOption::HERO_ID, selectedHero, color);
 
 	if(selectedBonus != initialBonus)
-		CSH->setPlayerOption(LobbyChangePlayerOption::BONUS_ID, selectedBonus, color);
+		CSH->setPlayerOption(LobbyChangePlayerOption::BONUS_ID, static_cast<int>(selectedBonus), color);
 }
 
 void OptionsTab::SelectionWindow::reopen()
 {
-	std::shared_ptr<SelectionWindow> window = std::shared_ptr<SelectionWindow>(new SelectionWindow(color, type));
+	auto window = std::shared_ptr<SelectionWindow>(new SelectionWindow(color, type));
 	close();
-	GH.windows().pushWindow(window);
+	if(CSH->isMyColor(color) || CSH->isHost())
+		GH.windows().pushWindow(window);
 }
 
 void OptionsTab::SelectionWindow::recreate()
@@ -719,7 +503,7 @@ void OptionsTab::SelectionWindow::recreate()
 			int count = 0;
 			for(auto & elem : allowedHeroes)
 			{
-				CHero * type = VLC->heroh->objects[elem];
+				const CHero * type = elem.toHeroType();
 				if(type->heroClass->faction == selectedFaction)
 				{
 					count++;
@@ -728,7 +512,7 @@ void OptionsTab::SelectionWindow::recreate()
 			elementsPerLine = floor(sqrt(count));
 		}
 
-		amountLines = calcLines((type > SelType::TOWN) ? selectedFaction : static_cast<FactionID>(PlayerSettings::RANDOM));
+		amountLines = calcLines((type > SelType::TOWN) ? selectedFaction : FactionID::RANDOM);
 	}
 
 	int x = (elementsPerLine) * (ICON_BIG_WIDTH-1);
@@ -753,11 +537,11 @@ void OptionsTab::SelectionWindow::recreate()
 
 void OptionsTab::SelectionWindow::drawOutlinedText(int x, int y, ColorRGBA color, std::string text)
 {
-	components.push_back(std::make_shared<CLabel>(x-1, y, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text));
-	components.push_back(std::make_shared<CLabel>(x+1, y, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text));
-	components.push_back(std::make_shared<CLabel>(x, y-1, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text));
-	components.push_back(std::make_shared<CLabel>(x, y+1, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text));
-	components.push_back(std::make_shared<CLabel>(x, y, FONT_TINY, ETextAlignment::CENTER, color, text));
+	components.push_back(std::make_shared<CLabel>(x-1, y, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text, 56));
+	components.push_back(std::make_shared<CLabel>(x+1, y, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text, 56));
+	components.push_back(std::make_shared<CLabel>(x, y-1, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text, 56));
+	components.push_back(std::make_shared<CLabel>(x, y+1, FONT_TINY, ETextAlignment::CENTER, Colors::BLACK, text, 56));
+	components.push_back(std::make_shared<CLabel>(x, y, FONT_TINY, ETextAlignment::CENTER, color, text, 56));
 }
 
 void OptionsTab::SelectionWindow::genContentGrid(int lines)
@@ -777,11 +561,11 @@ void OptionsTab::SelectionWindow::genContentFactions()
 
 	// random
 	PlayerSettings set = PlayerSettings();
-	set.castle = PlayerSettings::RANDOM;
+	set.castle = FactionID::RANDOM;
 	CPlayerSettingsHelper helper = CPlayerSettingsHelper(set, SelType::TOWN);
 	components.push_back(std::make_shared<CAnimImage>(helper.getImageName(), helper.getImageIndex(), 0, 6, (ICON_SMALL_HEIGHT/2)));
-	drawOutlinedText(TEXT_POS_X, TEXT_POS_Y, (selectedFaction.getNum() == PlayerSettings::RANDOM) ? Colors::YELLOW : Colors::WHITE, helper.getName());
-	if(selectedFaction.getNum() == PlayerSettings::RANDOM)
+	drawOutlinedText(TEXT_POS_X, TEXT_POS_Y, (selectedFaction == FactionID::RANDOM) ? Colors::YELLOW : Colors::WHITE, helper.getName());
+	if(selectedFaction == FactionID::RANDOM)
 		components.push_back(std::make_shared<CPicture>(ImagePath::builtin("lobby/townBorderSmallActivated"), 6, (ICON_SMALL_HEIGHT/2)));
 
 	for(auto & elem : allowedFactions)
@@ -809,11 +593,11 @@ void OptionsTab::SelectionWindow::genContentHeroes()
 
 	// random
 	PlayerSettings set = PlayerSettings();
-	set.hero = PlayerSettings::RANDOM;
+	set.hero = HeroTypeID::RANDOM;
 	CPlayerSettingsHelper helper = CPlayerSettingsHelper(set, SelType::HERO);
 	components.push_back(std::make_shared<CAnimImage>(helper.getImageName(), helper.getImageIndex(), 0, 6, (ICON_SMALL_HEIGHT/2)));
-	drawOutlinedText(TEXT_POS_X, TEXT_POS_Y, (selectedHero.getNum() == PlayerSettings::RANDOM) ? Colors::YELLOW : Colors::WHITE, helper.getName());
-	if(selectedHero.getNum() == PlayerSettings::RANDOM)
+	drawOutlinedText(TEXT_POS_X, TEXT_POS_Y, (selectedHero == HeroTypeID::RANDOM) ? Colors::YELLOW : Colors::WHITE, helper.getName());
+	if(selectedHero == HeroTypeID::RANDOM)
 		components.push_back(std::make_shared<CPicture>(ImagePath::builtin("lobby/townBorderSmallActivated"), 6, (ICON_SMALL_HEIGHT/2)));
 
 	for(auto & elem : allowedHeroes)
@@ -848,7 +632,7 @@ void OptionsTab::SelectionWindow::genContentHeroes()
 
 void OptionsTab::SelectionWindow::genContentBonus()
 {
-	PlayerSettings set = PlayerSettings();
+	PlayerSettings set = SEL->getStartInfo()->playerInfos.find(color)->second;
 
 	int i = 0;
 	for(auto elem : allowedBonus)
@@ -856,7 +640,7 @@ void OptionsTab::SelectionWindow::genContentBonus()
 		int x = i;
 		int y = 0;
 
-		set.bonus = static_cast<PlayerSettings::Ebonus>(elem);
+		set.bonus = elem;
 		CPlayerSettingsHelper helper = CPlayerSettingsHelper(set, SelType::BONUS);
 		components.push_back(std::make_shared<CAnimImage>(helper.getImageName(), helper.getImageIndex(), 0, x * (ICON_BIG_WIDTH-1) + 6, y * (ICON_BIG_HEIGHT-1) + (ICON_SMALL_HEIGHT/2)));
 		drawOutlinedText(x * (ICON_BIG_WIDTH-1) + TEXT_POS_X, y * (ICON_BIG_HEIGHT-1) + TEXT_POS_Y, Colors::WHITE , helper.getName());
@@ -892,9 +676,9 @@ void OptionsTab::SelectionWindow::setElement(int elem, bool doApply)
 		}
 		else
 		{
-			set.castle = PlayerSettings::RANDOM;
+			set.castle = FactionID::RANDOM;
 		}
-		if(set.castle.getNum() != PlayerSettings::NONE)
+		if(set.castle != FactionID::NONE)
 		{
 			if(!doApply)
 			{
@@ -916,18 +700,18 @@ void OptionsTab::SelectionWindow::setElement(int elem, bool doApply)
 		}
 		else
 		{
-			set.hero = PlayerSettings::RANDOM;
+			set.hero = HeroTypeID::RANDOM;
 		}
 
 		if(doApply && unusableHeroes.count(heroes[elem]))
 			return;
 
-		if(set.hero.getNum() != PlayerSettings::NONE)
+		if(set.hero != HeroTypeID::NONE)
 		{
 			if(!doApply)
 			{
 				CPlayerSettingsHelper helper = CPlayerSettingsHelper(set, SelType::HERO);
-				if(settings["general"]["enableUiEnhancements"].Bool() && helper.playerSettings.hero.getNum() > PlayerSettings::RANDOM && helper.playerSettings.heroName.empty())
+				if(settings["general"]["enableUiEnhancements"].Bool() && helper.playerSettings.hero.isValid() && helper.playerSettings.heroNameTextId.empty())
 					GH.windows().createAndPushWindow<CHeroOverview>(helper.playerSettings.hero);
 				else
 					GH.windows().createAndPushWindow<CPlayerOptionTooltipBox>(helper);
@@ -940,17 +724,15 @@ void OptionsTab::SelectionWindow::setElement(int elem, bool doApply)
 	{
 		if(elem >= 4)
 			return;
-		set.bonus = static_cast<PlayerSettings::Ebonus>(allowedBonus[elem]);
-		if(set.bonus != PlayerSettings::NONE)
+		set.bonus = static_cast<PlayerStartingBonus>(allowedBonus[elem]);
+
+		if(!doApply)
 		{
-			if(!doApply)
-			{
-				CPlayerSettingsHelper helper = CPlayerSettingsHelper(set, SelType::BONUS);
-				GH.windows().createAndPushWindow<CPlayerOptionTooltipBox>(helper);
-			}
-			else
-				selectedBonus = set.bonus;
+			CPlayerSettingsHelper helper = CPlayerSettingsHelper(set, SelType::BONUS);
+			GH.windows().createAndPushWindow<CPlayerOptionTooltipBox>(helper);
 		}
+		else
+			selectedBonus = set.bonus;
 	}
 
 	if(doApply)
@@ -992,7 +774,7 @@ OptionsTab::SelectedBox::SelectedBox(Point position, PlayerSettings & playerSett
 	OBJ_CONSTRUCTION_CAPTURING_ALL_NO_DISPOSE;
 
 	image = std::make_shared<CAnimImage>(getImageName(), getImageIndex());
-	subtitle = std::make_shared<CLabel>(23, 39, FONT_TINY, ETextAlignment::CENTER, Colors::WHITE, getName());
+	subtitle = std::make_shared<CLabel>(24, 39, FONT_TINY, ETextAlignment::CENTER, Colors::WHITE, getName(), 71);
 
 	pos = image->pos;
 
@@ -1008,12 +790,12 @@ void OptionsTab::SelectedBox::update()
 void OptionsTab::SelectedBox::showPopupWindow(const Point & cursorPosition)
 {
 	// cases when we do not need to display a message
-	if(playerSettings.castle.getNum() == PlayerSettings::NONE && CPlayerSettingsHelper::type == TOWN)
+	if(playerSettings.castle == FactionID::NONE && CPlayerSettingsHelper::selectionType == TOWN)
 		return;
-	if(playerSettings.hero.getNum() == PlayerSettings::NONE && !SEL->getPlayerInfo(playerSettings.color.getNum()).hasCustomMainHero() && CPlayerSettingsHelper::type == HERO)
+	if(playerSettings.hero == HeroTypeID::NONE && !SEL->getPlayerInfo(playerSettings.color).hasCustomMainHero() && CPlayerSettingsHelper::selectionType == HERO)
 		return;
 
-	if(settings["general"]["enableUiEnhancements"].Bool() && CPlayerSettingsHelper::type == HERO && playerSettings.hero.getNum() > PlayerSettings::RANDOM && playerSettings.heroName.empty())
+	if(settings["general"]["enableUiEnhancements"].Bool() && CPlayerSettingsHelper::selectionType == HERO && playerSettings.hero.isValid() && playerSettings.heroNameTextId.empty())
 		GH.windows().createAndPushWindow<CHeroOverview>(playerSettings.hero);
 	else
 		GH.windows().createAndPushWindow<CPlayerOptionTooltipBox>(*this);
@@ -1021,20 +803,23 @@ void OptionsTab::SelectedBox::showPopupWindow(const Point & cursorPosition)
 
 void OptionsTab::SelectedBox::clickReleased(const Point & cursorPosition)
 {
-	PlayerInfo pi = SEL->getPlayerInfo(playerSettings.color.getNum());
+	if(SEL->screenType != ESelectionScreen::newGame)
+		return;
+	
+	PlayerInfo pi = SEL->getPlayerInfo(playerSettings.color);
 	const bool foreignPlayer = CSH->isGuest() && !CSH->isMyColor(playerSettings.color);
 
-	if(type == SelType::TOWN && ((pi.allowedFactions.size() < 2 && !pi.isFactionRandom) || foreignPlayer))
+	if(selectionType == SelType::TOWN && ((pi.allowedFactions.size() < 2 && !pi.isFactionRandom) || foreignPlayer))
 		return;
 
-	if(type == SelType::HERO && ((pi.defaultHero() != -1 || playerSettings.castle.getNum() < 0) || foreignPlayer))
+	if(selectionType == SelType::HERO && ((pi.defaultHero() == HeroTypeID::NONE || !playerSettings.castle.isValid() || foreignPlayer)))
 		return;
 
-	if(type == SelType::BONUS && foreignPlayer)
+	if(selectionType == SelType::BONUS && foreignPlayer)
 		return;
 
 	GH.input().hapticFeedback();
-	GH.windows().createAndPushWindow<SelectionWindow>(playerSettings.color, type);
+	GH.windows().createAndPushWindow<SelectionWindow>(playerSettings.color, selectionType);
 }
 
 void OptionsTab::SelectedBox::scrollBy(int distance)
@@ -1044,7 +829,7 @@ void OptionsTab::SelectedBox::scrollBy(int distance)
 	// so, currently, gesture will always move selection only by 1, and then wait for recreation from server info
 	distance = std::clamp(distance, -1, 1);
 
-	switch(CPlayerSettingsHelper::type)
+	switch(CPlayerSettingsHelper::selectionType)
 	{
 		case TOWN:
 			CSH->setPlayerOption(LobbyChangePlayerOption::TOWN, distance, playerSettings.color);
@@ -1061,15 +846,17 @@ void OptionsTab::SelectedBox::scrollBy(int distance)
 }
 
 OptionsTab::PlayerOptionsEntry::PlayerOptionsEntry(const PlayerSettings & S, const OptionsTab & parent)
-	: pi(std::make_unique<PlayerInfo>(SEL->getPlayerInfo(S.color.getNum())))
+	: CIntObject(LCLICK | KEYBOARD | TEXTINPUT)
+	, pi(std::make_unique<PlayerInfo>(SEL->getPlayerInfo(S.color)))
 	, s(std::make_unique<PlayerSettings>(S))
 	, parentTab(parent)
+	, name(S.name)
 {
 	OBJ_CONSTRUCTION;
 	defActions |= SHARE_POS;
 
 	int serial = 0;
-	for(int g = 0; g < s->color.getNum(); ++g)
+	for(PlayerColor g = PlayerColor(0); g < s->color; ++g)
 	{
 		auto itred = SEL->getPlayerInfo(g);
 		if(itred.canComputerPlay || itred.canHumanPlay)
@@ -1080,7 +867,7 @@ OptionsTab::PlayerOptionsEntry::PlayerOptionsEntry(const PlayerSettings & S, con
 	pos.y += 128 + serial * 50;
 
 	assert(CSH->mi && CSH->mi->mapHeader);
-	const PlayerInfo & p = SEL->getPlayerInfo(s->color.getNum());
+	const PlayerInfo & p = SEL->getPlayerInfo(s->color);
 	assert(p.canComputerPlay || p.canHumanPlay); //someone must be able to control this player
 	if(p.canHumanPlay && p.canComputerPlay)
 		whoCanPlay = HUMAN_OR_CPU;
@@ -1100,8 +887,14 @@ OptionsTab::PlayerOptionsEntry::PlayerOptionsEntry(const PlayerSettings & S, con
 		"ADOPOPNL.bmp", "ADOPPPNL.bmp", "ADOPTPNL.bmp", "ADOPSPNL.bmp"
 	}};
 
-	background = std::make_shared<CPicture>(ImagePath::builtin(bgs[s->color.getNum()]), 0, 0);
-	labelPlayerName = std::make_shared<CLabel>(55, 10, EFonts::FONT_SMALL, ETextAlignment::CENTER, Colors::WHITE, s->name);
+	background = std::make_shared<CPicture>(ImagePath::builtin(bgs[s->color]), 0, 0);
+	if(s->isControlledByAI() || CSH->isGuest())
+		labelPlayerName = std::make_shared<CLabel>(55, 10, EFonts::FONT_SMALL, ETextAlignment::CENTER, Colors::WHITE, name, 95);
+	else
+	{
+		labelPlayerNameEdit = std::make_shared<CTextInput>(Rect(6, 3, 95, 15), EFonts::FONT_SMALL, nullptr, false);
+		labelPlayerNameEdit->setText(name);
+	}
 	labelWhoCanPlay = std::make_shared<CMultiLineLabel>(Rect(6, 23, 45, (int)graphics->fonts[EFonts::FONT_TINY]->getLineHeight()*2), EFonts::FONT_TINY, ETextAlignment::CENTER, Colors::WHITE, CGI->generaltexth->arraytxt[206 + whoCanPlay]);
 
 	if(SEL->screenType == ESelectionScreen::newGame)
@@ -1116,7 +909,7 @@ OptionsTab::PlayerOptionsEntry::PlayerOptionsEntry(const PlayerSettings & S, con
 
 	hideUnavailableButtons();
 
-	if(SEL->screenType != ESelectionScreen::scenarioInfo && SEL->getPlayerInfo(s->color.getNum()).canHumanPlay)
+	if(SEL->screenType != ESelectionScreen::scenarioInfo && SEL->getPlayerInfo(s->color).canHumanPlay)
 	{
 		flag = std::make_shared<CButton>(
 			Point(-43, 2),
@@ -1135,9 +928,46 @@ OptionsTab::PlayerOptionsEntry::PlayerOptionsEntry(const PlayerSettings & S, con
 	bonus = std::make_shared<SelectedBox>(Point(271, 2), *s, BONUS);
 }
 
+bool OptionsTab::PlayerOptionsEntry::captureThisKey(EShortcut key)
+{
+	return labelPlayerNameEdit && labelPlayerNameEdit->hasFocus() && key == EShortcut::GLOBAL_ACCEPT;
+}
+
+void OptionsTab::PlayerOptionsEntry::keyPressed(EShortcut key)
+{
+	if(labelPlayerNameEdit && key == EShortcut::GLOBAL_ACCEPT)
+		updateName();
+}
+
+bool OptionsTab::PlayerOptionsEntry::receiveEvent(const Point & position, int eventType) const
+{
+	return eventType == AEventsReceiver::LCLICK; // capture all left clicks (not only within control)
+}
+
+void OptionsTab::PlayerOptionsEntry::clickReleased(const Point & cursorPosition)
+{
+	if(labelPlayerNameEdit && !labelPlayerNameEdit->pos.isInside(cursorPosition))
+		updateName();
+}
+
+void OptionsTab::PlayerOptionsEntry::updateName() {
+	if(labelPlayerNameEdit->getText() != name)
+	{
+		CSH->setPlayerName(s->color, labelPlayerNameEdit->getText());
+		if(CSH->isMyColor(s->color))
+		{
+			Settings set = settings.write["general"]["playerName"];
+			set->String() = labelPlayerNameEdit->getText();
+		}
+	}
+
+	labelPlayerNameEdit->removeFocus();
+	name = labelPlayerNameEdit->getText();
+}
+
 void OptionsTab::onSetPlayerClicked(const PlayerSettings & ps) const
 {
-	if(ps.isControlledByAI() || humanPlayers > 0)
+	if(ps.isControlledByAI() || humanPlayers > 1)
 		CSH->setPlayer(ps.color);
 }
 
@@ -1159,7 +989,7 @@ void OptionsTab::PlayerOptionsEntry::hideUnavailableButtons()
 		buttonTownRight->enable();
 	}
 
-	if((pi->defaultHero() != -1 || s->castle.getNum() < 0) //fixed hero
+	if((pi->defaultHero() != HeroTypeID::RANDOM || !s->castle.isValid()) //fixed hero
 		|| foreignPlayer) //or not our player
 	{
 		buttonHeroLeft->disable();

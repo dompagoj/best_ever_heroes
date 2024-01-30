@@ -35,7 +35,6 @@
 
 CPicture::CPicture(std::shared_ptr<IImage> image, const Point & position)
 	: bg(image)
-	, visible(true)
 	, needRefresh(false)
 {
 	pos += position;
@@ -53,7 +52,6 @@ CPicture::CPicture( const ImagePath & bmpname )
 
 CPicture::CPicture( const ImagePath & bmpname, const Point & position )
 	: bg(GH.renderHandler().loadImage(bmpname))
-	, visible(true)
 	, needRefresh(false)
 {
 	pos.x += position.x;
@@ -81,13 +79,13 @@ CPicture::CPicture(std::shared_ptr<IImage> image, const Rect &SrcRect, int x, in
 
 void CPicture::show(Canvas & to)
 {
-	if (visible && needRefresh)
+	if (needRefresh)
 		showAll(to);
 }
 
 void CPicture::showAll(Canvas & to)
 {
-	if(bg && visible)
+	if(bg)
 	{
 		if (srcRect.has_value())
 			to.draw(bg, pos.topLeft(), *srcRect);
@@ -96,7 +94,7 @@ void CPicture::showAll(Canvas & to)
 	}
 }
 
-void CPicture::setAlpha(int value)
+void CPicture::setAlpha(uint8_t value)
 {
 	bg->setAlpha(value);
 }
@@ -273,6 +271,18 @@ void CAnimImage::showAll(Canvas & to)
 				to.draw(img, pos.topLeft());
 		}
 	}
+}
+
+void CAnimImage::setAnimationPath(const AnimationPath & name, size_t frame)
+{
+	this->frame = frame;
+	anim = GH.renderHandler().loadAnimation(name);
+	init();
+}
+
+void CAnimImage::setScale(Point scale)
+{
+	scaledSize = scale;
 }
 
 void CAnimImage::setFrame(size_t Frame, size_t Group)

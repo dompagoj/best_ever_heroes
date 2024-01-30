@@ -23,7 +23,7 @@ class IImage;
 
 enum ESortBy
 {
-	_playerAm, _size, _format, _name, _viccon, _loscon, _numOfMaps, _fileName
+	_playerAm, _size, _format, _name, _viccon, _loscon, _numOfMaps, _fileName, _changeDate
 }; //_numOfMaps is for campaigns
 
 class ElementInfo : public CMapInfo
@@ -67,25 +67,6 @@ class SelectionTab : public CIntObject
 	// FIXME: CSelectionBase use them too!
 	std::shared_ptr<CAnimation> iconsVictoryCondition;
 	std::shared_ptr<CAnimation> iconsLossCondition;
-
-	class CMapInfoTooltipBox : public CWindowObject
-	{
-		const int IMAGE_SIZE = 169;
-		const int BORDER = 30;
-
-		bool drawPlayerElements;
-		bool renderImage;
-
-		std::shared_ptr<CFilledTexture> backgroundTexture;
-		std::shared_ptr<CTextBox> label;
-		std::shared_ptr<CPicture> image1;
-		std::shared_ptr<CPicture> image2;
-
-		Canvas createMinimapForLayer(std::unique_ptr<CMap> & map, int layer);
-		std::vector<std::shared_ptr<IImage>> createMinimaps(ResourcePath resource, int size);
-	public:
-		CMapInfoTooltipBox(std::string text, ResourcePath resource, ESelectionScreen tabType);
-	};
 public:
 	std::vector<std::shared_ptr<ElementInfo>> allItems;
 	std::vector<std::shared_ptr<ElementInfo>> curItems;
@@ -97,6 +78,7 @@ public:
 	ESortBy generalSortingBy;
 	bool sortModeAscending;
 	int currentMapSizeFilter = 0;
+	bool showRandom;
 
 	std::shared_ptr<CTextInput> inputName;
 

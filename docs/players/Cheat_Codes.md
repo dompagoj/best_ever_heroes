@@ -36,7 +36,7 @@ Gives specific creature in every slot, with optional amount. Examples:
 
 ### Movement points
 
-`nwcnebuchadnezzar` or `vcminahar` or `vcmimove` - give 1000000 movement points and free ship boarding for 1 day  
+`nwcnebuchadnezzar` or `vcminahar` or `vcmimove` - give unlimited (or specified amount of) movement points and free ship boarding
 Alternative usage: `vcmimove <amount>` - gives specified amount of movement points
 
 ### Resources
@@ -57,10 +57,22 @@ Alternative usage: `vcmilevel <amount>` - advances hero by specified number of l
 - `vcmiolorin` or `vcmiexp` - gives selected hero 10000 experience
 Alternative usage: `vcmiexp <amount>` - gives selected hero specified amount of experience
 
+### Luck and morale
+
+`nwcfollowthewhiterabbit` or `vcmiluck` - the currently selected hero permanently gains maximum luck
+`nwcmorpheus` or `vcmimorale` - the currently selected hero permanently gains maximum morale
+
+### Puzzle map
+
+`nwcoracle` or `vcmiobelisk` - reveals the puzzle map
+
 ### Finishing the game
 
-`nwcredpill` or `vcmisilmaril` or `vcmiwin` - player wins  
-`nwcbluepill` or `vcmimelkor` or `vcmilose` - player loses  
+`nwcredpill` or `vcmisilmaril` or `vcmiwin` - player wins
+`nwcbluepill` or `vcmimelkor` or `vcmilose` - player loses
+
+### Misc
+`nwctheone` or `vcmigod` - reveals the whole map, gives 5 archangels in each empty slot, unlimited movement points and permanent flight
 
 ## Using cheat codes on other players
 By default, all cheat codes apply to current player. Alternatively, it is possible to specify player that you want to target:
@@ -131,6 +143,5 @@ Below a list of supported commands, with their arguments wrapped in `<>`
 `activate <0/1/2>` - activate game windows (no current use, apparently broken long ago)  
 `redraw` - force full graphical redraw  
 `screen` - show value of screenBuf variable, which prints "screen" when adventure map has current focus, "screen2" otherwise, and dumps values of both screen surfaces to .bmp files  
-`unlock pim` - unlocks specific mutex known in VCMI code as "pim"  
 `not dialog` - set the state indicating if dialog box is active to "no"  
 `tell hs <hero ID> <artifact slot ID>` - write what artifact is present on artifact slot with specified ID for hero with specified ID. (must be called during gameplay)  

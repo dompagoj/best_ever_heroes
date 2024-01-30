@@ -9,13 +9,14 @@
  */
 #pragma once
 
+#include "OptionsTabBase.h"
 #include "../windows/CWindowObject.h"
 #include "../widgets/Scrollable.h"
-#include "../gui/InterfaceObjectConfigurable.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 struct PlayerSettings;
 struct PlayerInfo;
+enum class PlayerStartingBonus : int8_t;
 VCMI_LIB_NAMESPACE_END
 
 class CLabel;
@@ -29,7 +30,7 @@ class CButton;
 class FilledTexturePlayerColored;
 
 /// The options tab which is shown at the map selection phase.
-class OptionsTab : public InterfaceObjectConfigurable
+class OptionsTab : public OptionsTabBase
 {
 	struct PlayerOptionsEntry;
 	
@@ -54,10 +55,10 @@ private:
 	struct CPlayerSettingsHelper
 	{
 		const PlayerSettings & playerSettings;
-		const SelType type;
+		const SelType selectionType;
 
 		CPlayerSettingsHelper(const PlayerSettings & playerSettings, SelType type)
-			: playerSettings(playerSettings), type(type)
+			: playerSettings(playerSettings), selectionType(type)
 		{}
 
 		/// visible image settings
@@ -118,14 +119,14 @@ private:
 
 		FactionID initialFaction;
 		HeroTypeID initialHero;
-		int initialBonus;
+		PlayerStartingBonus initialBonus;
 		FactionID selectedFaction;
 		HeroTypeID selectedHero;
-		int selectedBonus;
+		PlayerStartingBonus selectedBonus;
 
 		std::set<FactionID> allowedFactions;
 		std::set<HeroTypeID> allowedHeroes;
-		std::vector<int> allowedBonus;
+		std::vector<PlayerStartingBonus> allowedBonus;
 
 		void genContentGrid(int lines);
 		void genContentFactions();
@@ -147,7 +148,7 @@ private:
 	public:
 		void reopen();
 
-		SelectionWindow(PlayerColor _color, SelType _type);
+		SelectionWindow(const PlayerColor & color, SelType _type);
 	};
 
 	/// Image with current town/hero/bonus
@@ -166,9 +167,11 @@ private:
 
 	struct PlayerOptionsEntry : public CIntObject
 	{
+		std::string name;
 		std::unique_ptr<PlayerInfo> pi;
 		std::unique_ptr<PlayerSettings> s;
 		std::shared_ptr<CLabel> labelPlayerName;
+		std::shared_ptr<CTextInput> labelPlayerNameEdit;
 		std::shared_ptr<CMultiLineLabel> labelWhoCanPlay;
 		std::shared_ptr<CPicture> background;
 		std::shared_ptr<CButton> buttonTownLeft;
@@ -185,8 +188,14 @@ private:
 
 		PlayerOptionsEntry(const PlayerSettings & S, const OptionsTab & parentTab);
 		void hideUnavailableButtons();
+		bool captureThisKey(EShortcut key) override;
+		void keyPressed(EShortcut key) override;
+		void clickReleased(const Point & cursorPosition) override;
+		bool receiveEvent(const Point & position, int eventType) const override;
 
 	private:
 		const OptionsTab & parentTab;
+
+		void updateName();
 	};
 };

@@ -38,7 +38,7 @@ public:
 	virtual std::string toString() const;
 	virtual JsonNode toJsonNode() const;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 	}
 };
@@ -53,7 +53,7 @@ public:
 	void add(const TLimiterPtr & limiter);
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler & h, const int version)
+	template <typename Handler> void serialize(Handler & h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & limiters;
@@ -104,7 +104,7 @@ public:
 	std::string toString() const override;
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & creature;
@@ -116,23 +116,23 @@ class DLL_LINKAGE HasAnotherBonusLimiter : public ILimiter //applies only to nod
 {
 public:
 	BonusType type;
-	TBonusSubtype subtype;
+	BonusSubtypeID subtype;
 	BonusSource source;
-	si32 sid;
+	BonusSourceID sid;
 	bool isSubtypeRelevant; //check for subtype only if this is true
 	bool isSourceRelevant; //check for bonus source only if this is true
 	bool isSourceIDRelevant; //check for bonus source only if this is true
 
 	HasAnotherBonusLimiter(BonusType bonus = BonusType::NONE);
-	HasAnotherBonusLimiter(BonusType bonus, TBonusSubtype _subtype);
+	HasAnotherBonusLimiter(BonusType bonus, BonusSubtypeID _subtype);
 	HasAnotherBonusLimiter(BonusType bonus, BonusSource src);
-	HasAnotherBonusLimiter(BonusType bonus, TBonusSubtype _subtype, BonusSource src);
+	HasAnotherBonusLimiter(BonusType bonus, BonusSubtypeID _subtype, BonusSource src);
 
 	EDecision limit(const BonusLimitationContext &context) const override;
 	std::string toString() const override;
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & type;
@@ -156,7 +156,7 @@ public:
 	std::string toString() const override;
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & terrainType;
@@ -175,7 +175,7 @@ public:
 	std::string toString() const override;
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & minLevel;
@@ -193,7 +193,7 @@ public:
 	std::string toString() const override;
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & faction;
@@ -210,7 +210,7 @@ public:
 	std::string toString() const override;
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & alignment;
@@ -225,7 +225,7 @@ public:
 
 	EDecision limit(const BonusLimitationContext &context) const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & owner;
@@ -235,13 +235,14 @@ public:
 class DLL_LINKAGE RankRangeLimiter : public ILimiter //applies to creatures with min <= Rank <= max
 {
 public:
-	ui8 minRank, maxRank;
+	ui8 minRank;
+	ui8 maxRank;
 
 	RankRangeLimiter();
 	RankRangeLimiter(ui8 Min, ui8 Max = 255);
 	EDecision limit(const BonusLimitationContext &context) const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & minRank;
@@ -258,7 +259,7 @@ public:
 	EDecision limit(const BonusLimitationContext &context) const override;
 	JsonNode toJsonNode() const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<ILimiter&>(*this);
 		h & applicableHexes;

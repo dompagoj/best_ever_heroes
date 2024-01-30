@@ -21,6 +21,7 @@
 #include "../CStopWatch.h"
 #include "../GameSettings.h"
 #include "../Languages.h"
+#include "../MetaString.h"
 #include "../ScriptHandler.h"
 #include "../constants/StringConstants.h"
 #include "../filesystem/Filesystem.h"
@@ -86,17 +87,28 @@ std::vector <TModID> CModHandler::validateAndSortDependencies(std::vector <TModI
 	std::set <TModID> resolvedModIDs; // Use a set for validation for performance reason, but set does not keep order of elements
 
 	// Mod is resolved if it has not dependencies or all its dependencies are already resolved
-	auto isResolved = [&](const CModInfo & mod) -> CModInfo::EValidationStatus
+	auto isResolved = [&](const CModInfo & mod) -> bool
 	{
 		if(mod.dependencies.size() > resolvedModIDs.size())
-			return CModInfo::PENDING;
+			return false;
 
 		for(const TModID & dependency : mod.dependencies)
 		{
 			if(!vstd::contains(resolvedModIDs, dependency))
-				return CModInfo::PENDING;
+				return false;
 		}
-		return CModInfo::PASSED;
+
+		for(const TModID & conflict : mod.conflicts)
+		{
+			if(vstd::contains(resolvedModIDs, conflict))
+				return false;
+		}
+		for(const TModID & reverseConflict : resolvedModIDs)
+		{
+			if (vstd::contains(allMods.at(reverseConflict).conflicts, mod.identifier))
+				return false;
+		}
+		return true;
 	};
 
 	while(true)
@@ -104,7 +116,7 @@ std::vector <TModID> CModHandler::validateAndSortDependencies(std::vector <TModI
 		std::set <TModID> resolvedOnCurrentTreeLevel;
 		for(auto it = modsToResolve.begin(); it != modsToResolve.end();) // One iteration - one level of mods tree
 		{
-			if(isResolved(allMods.at(*it)) == CModInfo::PASSED)
+			if(isResolved(allMods.at(*it)))
 			{
 				resolvedOnCurrentTreeLevel.insert(*it); // Not to the resolvedModIDs, so current node childs will be resolved on the next iteration
 				sortedValidMods.push_back(*it);
@@ -122,14 +134,42 @@ std::vector <TModID> CModHandler::validateAndSortDependencies(std::vector <TModI
 		break;
 	}
 
+	modLoadErrors = std::make_unique<MetaString>();
+
+	auto addErrorMessage = [this](const std::string & textID, const std::string & brokenModID, const std::string & missingModID)
+	{
+		modLoadErrors->appendTextID(textID);
+
+		if (allMods.count(brokenModID))
+			modLoadErrors->replaceRawString(allMods.at(brokenModID).getVerificationInfo().name);
+		else
+			modLoadErrors->replaceRawString(brokenModID);
+
+		if (allMods.count(missingModID))
+			modLoadErrors->replaceRawString(allMods.at(missingModID).getVerificationInfo().name);
+		else
+			modLoadErrors->replaceRawString(missingModID);
+
+	};
+
 	// Left mods have unresolved dependencies, output all to log.
 	for(const auto & brokenModID : modsToResolve)
 	{
 		const CModInfo & brokenMod = allMods.at(brokenModID);
 		for(const TModID & dependency : brokenMod.dependencies)
 		{
-			if(!vstd::contains(resolvedModIDs, dependency))
-				logMod->error("Mod '%s' will not work: it depends on mod '%s', which is not installed.", brokenMod.getVerificationInfo().name, dependency);
+			if(!vstd::contains(resolvedModIDs, dependency) && brokenMod.config["modType"].String() != "Compatibility")
+				addErrorMessage("vcmi.server.errors.modNoDependency", brokenModID, dependency);
+		}
+		for(const TModID & conflict : brokenMod.conflicts)
+		{
+			if(vstd::contains(resolvedModIDs, conflict))
+				addErrorMessage("vcmi.server.errors.modConflict", brokenModID, conflict);
+		}
+		for(const TModID & reverseConflict : resolvedModIDs)
+		{
+			if (vstd::contains(allMods.at(reverseConflict).conflicts, brokenModID))
+				addErrorMessage("vcmi.server.errors.modConflict", brokenModID, reverseConflict);
 		}
 	}
 	return sortedValidMods;
@@ -197,24 +237,17 @@ void CModHandler::loadOneMod(std::string modName, const std::string & parent, co
 	}
 }
 
-void CModHandler::loadMods(bool onlyEssential)
+void CModHandler::loadMods()
 {
 	JsonNode modConfig;
 
-	if(onlyEssential)
-	{
-		loadOneMod("vcmi", "", modConfig, true);//only vcmi and submods
-	}
-	else
-	{
-		modConfig = loadModSettings(JsonPath::builtin("config/modSettings.json"));
-		loadMods("", "", modConfig["activeMods"], true);
-	}
+	modConfig = loadModSettings(JsonPath::builtin("config/modSettings.json"));
+	loadMods("", "", modConfig["activeMods"], true);
 
 	coreMod = std::make_unique<CModInfo>(ModScope::scopeBuiltin(), modConfig[ModScope::scopeBuiltin()], JsonNode(JsonPath::builtin("config/gameConfig.json")));
 }
 
-std::vector<std::string> CModHandler::getAllMods()
+std::vector<std::string> CModHandler::getAllMods() const
 {
 	std::vector<std::string> modlist;
 	modlist.reserve(allMods.size());
@@ -223,9 +256,14 @@ std::vector<std::string> CModHandler::getAllMods()
 	return modlist;
 }
 
-std::vector<std::string> CModHandler::getActiveMods()
+std::vector<std::string> CModHandler::getActiveMods() const
 {
 	return activeMods;
+}
+
+std::string CModHandler::getModLoadErrors() const
+{
+	return modLoadErrors->toString();
 }
 
 const CModInfo & CModHandler::getModInfo(const TModID & modId) const
@@ -299,28 +337,35 @@ void CModHandler::loadModFilesystems()
 	}
 }
 
-TModID CModHandler::findResourceOrigin(const ResourcePath & name)
+TModID CModHandler::findResourceOrigin(const ResourcePath & name) const
 {
-	for(const auto & modID : boost::adaptors::reverse(activeMods))
+	try
 	{
-		if(CResourceHandler::get(modID)->existsResource(name))
-			return modID;
+		for(const auto & modID : boost::adaptors::reverse(activeMods))
+		{
+			if(CResourceHandler::get(modID)->existsResource(name))
+				return modID;
+		}
+
+		if(CResourceHandler::get("core")->existsResource(name))
+			return "core";
+
+		if(CResourceHandler::get("mapEditor")->existsResource(name))
+			return "core"; // Workaround for loading maps via map editor
 	}
-
-	if(CResourceHandler::get("core")->existsResource(name))
-		return "core";
-
-	if(CResourceHandler::get("mapEditor")->existsResource(name))
-		return "core"; // Workaround for loading maps via map editor
-
-	assert(0);
-	return "";
+	catch( const std::out_of_range & e)
+	{
+		// no-op
+	}
+	throw std::runtime_error("Resource with name " + name.getName() + " and type " + EResTypeHelper::getEResTypeAsString(name.getType()) + " wasn't found.");
 }
 
 std::string CModHandler::getModLanguage(const TModID& modId) const
 {
-	if ( modId == "core")
+	if(modId == "core")
 		return VLC->generaltexth->getInstalledLanguage();
+	if(modId == "map")
+		return VLC->generaltexth->getPreferredLanguage();
 	return allMods.at(modId).baseLanguage;
 }
 
@@ -468,88 +513,6 @@ void CModHandler::afterLoad(bool onlyEssential)
 		std::fstream file(CResourceHandler::get()->getResourceName(ResourcePath("config/modSettings.json"))->c_str(), std::ofstream::out | std::ofstream::trunc);
 		file << modSettings.toJson();
 	}
-
-}
-
-void CModHandler::trySetActiveMods(const std::vector<std::pair<TModID, CModInfo::VerificationInfo>> & modList)
-{
-	auto searchVerificationInfo = [&modList](const TModID & m) -> const CModInfo::VerificationInfo*
-	{
-		for(auto & i : modList)
-			if(i.first == m)
-				return &i.second;
-		return nullptr;
-	};
-	
-	std::vector<TModID> missingMods, excessiveMods;
-	ModIncompatibility::ModListWithVersion missingModsResult;
-	ModIncompatibility::ModList excessiveModsResult;
-	
-	for(const auto & m : activeMods)
-	{
-		if(searchVerificationInfo(m))
-			continue;
-
-		//TODO: support actual disabling of these mods
-		if(getModInfo(m).checkModGameplayAffecting())
-			excessiveMods.push_back(m);
-	}
-	
-	for(const auto & infoPair : modList)
-	{
-		auto & remoteModId = infoPair.first;
-		auto & remoteModInfo = infoPair.second;
-		
-		bool modAffectsGameplay = remoteModInfo.impactsGameplay;
-		//parent mod affects gameplay if child affects too
-		for(const auto & subInfoPair : modList)
-			modAffectsGameplay |= (subInfoPair.second.impactsGameplay && subInfoPair.second.parent == remoteModId);
-		
-		if(!allMods.count(remoteModId))
-		{
-			if(modAffectsGameplay)
-				missingMods.push_back(remoteModId); //mod is not installed
-			continue;
-		}
-		
-		auto & localModInfo = getModInfo(remoteModId).getVerificationInfo();
-		modAffectsGameplay |= getModInfo(remoteModId).checkModGameplayAffecting();
-		bool modVersionCompatible = localModInfo.version.isNull()
-			|| remoteModInfo.version.isNull()
-			|| localModInfo.version.compatible(remoteModInfo.version);
-		bool modLocalyEnabled = vstd::contains(activeMods, remoteModId);
-		
-		if(modVersionCompatible && modAffectsGameplay && modLocalyEnabled)
-			continue;
-		
-		if(modAffectsGameplay)
-			missingMods.push_back(remoteModId); //incompatible mod impacts gameplay
-	}
-	
-	//filter mods
-	for(auto & m : missingMods)
-	{
-		if(auto * vInfo = searchVerificationInfo(m))
-		{
-			assert(vInfo->parent != m);
-			if(!vInfo->parent.empty() && vstd::contains(missingMods, vInfo->parent))
-				continue;
-			missingModsResult.push_back({vInfo->name, vInfo->version.toString()});
-		}
-	}
-	for(auto & m : excessiveMods)
-	{
-		auto & vInfo = getModInfo(m).getVerificationInfo();
-		assert(vInfo.parent != m);
-		if(!vInfo.parent.empty() && vstd::contains(excessiveMods, vInfo.parent))
-			continue;
-		excessiveModsResult.push_back(vInfo.name);
-	}
-	
-	if(!missingModsResult.empty() || !excessiveModsResult.empty())
-		throw ModIncompatibility(missingModsResult, excessiveModsResult);
-	
-	//TODO: support actual enabling of required mods
 }
 
 VCMI_LIB_NAMESPACE_END

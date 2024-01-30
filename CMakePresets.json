@@ -66,6 +66,15 @@
             }
         },
         {
+            "name": "linux-clang-release-ccache",
+            "displayName": "Clang x86_64-pc-linux-gnu with ccache",
+            "description": "VCMI Linux Clang with ccache",
+            "inherits": "linux-release",
+            "cacheVariables": {
+                "ENABLE_CCACHE": "ON"
+            }
+        },
+        {
             "name": "linux-gcc-release",
             "displayName": "GCC x86_64-pc-linux-gnu",
             "description": "VCMI Linux GCC",
@@ -77,6 +86,15 @@
             }
         },
         {
+            "name": "linux-gcc-release-ccache",
+            "displayName": "GCC x86_64-pc-linux-gnu with ccache",
+            "description": "VCMI Linux GCC with ccache",
+            "inherits": "linux-release",
+            "cacheVariables": {
+                "ENABLE_CCACHE": "ON"
+            }
+        },
+        {
             "name": "linux-gcc-debug",
             "displayName": "GCC x86_64-pc-linux-gnu (debug)",
             "description": "VCMI Linux GCC (Debug)",
@@ -84,7 +102,6 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "ENABLE_LUA" : "ON",
-                "ENABLE_PCH" : "OFF",
                 "CMAKE_C_COMPILER": "/usr/bin/gcc",
                 "CMAKE_CXX_COMPILER": "/usr/bin/g++"
             }
@@ -111,6 +128,15 @@
             }
         },
         {
+            "name": "windows-mingw-release",
+            "displayName": "Windows x64 MinGW Release",
+            "description": "VCMI Windows Ninja using MinGW",
+            "inherits": "default-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
             "name": "windows-msvc-release",
             "displayName": "Windows x64 RelWithDebInfo",
             "description": "VCMI RelWithDebInfo build",
@@ -124,6 +150,17 @@
                 "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
                 "CMAKE_POLICY_DEFAULT_CMP0091": "NEW",
                 "FORCE_BUNDLED_MINIZIP": "ON"
+
+            }
+        },
+        {
+            "name": "windows-msvc-release-ccache",
+            "displayName": "Windows x64 RelWithDebInfo with ccache",
+            "description": "VCMI RelWithDebInfo build with ccache",
+            "inherits": "windows-msvc-release",
+            "cacheVariables": {
+                "ENABLE_CCACHE": "ON"
+
             }
         },
         {
@@ -224,6 +261,16 @@
             }
         },
         {
+            "name": "ios-release-conan-ccache",
+            "displayName": "iOS+Conan release using ccache",
+            "description": "VCMI iOS release using Conan and ccache",
+            "inherits": "ios-release-conan",
+            "cacheVariables": {
+                "ENABLE_PCH" : "OFF",
+                "ENABLE_CCACHE": "ON"
+            }
+        },
+        {
             "name": "ios-release-legacy",
             "displayName": "iOS release using legacy dependencies",
             "description": "VCMI iOS release using legacy dependencies",
@@ -265,6 +312,11 @@
             "inherits": "default-release"
         },
         {
+            "name": "linux-clang-release-ccache",
+            "configurePreset": "linux-clang-release-ccache",
+            "inherits": "linux-clang-release"
+        },
+        {
             "name": "linux-clang-test",
             "configurePreset": "linux-clang-test",
             "inherits": "default-release"
@@ -278,6 +330,11 @@
             "name": "linux-gcc-release",
             "configurePreset": "linux-gcc-release",
             "inherits": "default-release"
+        },
+        {
+            "name": "linux-gcc-release-ccache",
+            "configurePreset": "linux-gcc-release-ccache",
+            "inherits": "linux-gcc-release"
         },
         {
             "name": "linux-gcc-debug",
@@ -305,10 +362,19 @@
             "inherits": "default-release"
         },
         {
+            "name": "windows-mingw-release",
+            "configurePreset": "windows-mingw-release",
+            "inherits": "default-release"
+        },
+        {
             "name": "windows-msvc-release",
             "configurePreset": "windows-msvc-release",
-            "inherits": "default-release",
-            "configuration": "Release"
+            "inherits": "default-release"
+        },
+        {
+            "name": "windows-msvc-release-ccache",
+            "configurePreset": "windows-msvc-release-ccache",
+            "inherits": "windows-msvc-release"
         },
         {
             "name": "windows-msvc-relwithdebinfo",
@@ -330,6 +396,11 @@
             "nativeToolOptions": [
                 "CODE_SIGNING_ALLOWED_FOR_APPS=NO"
             ]
+        },
+        {
+            "name": "ios-release-conan-ccache",
+            "configurePreset": "ios-release-conan-ccache",
+            "inherits": "ios-release-conan"
         },
         {
             "name": "ios-release-legacy",
@@ -379,6 +450,11 @@
         {
             "name": "macos-ninja-release",
             "configurePreset": "macos-ninja-release",
+            "inherits": "default-release"
+        },
+        {
+            "name": "windows-mingw-release",
+            "configurePreset": "windows-mingw-release",
             "inherits": "default-release"
         },
         {

@@ -21,6 +21,7 @@ set(editor_SRCS
 		mapsettings/loseconditions.cpp
 		mapsettings/eventsettings.cpp
 		mapsettings/rumorsettings.cpp
+		mapsettings/translations.cpp
 		playersettings.cpp
 		playerparams.cpp
 		scenelayer.cpp
@@ -33,6 +34,8 @@ set(editor_SRCS
 		inspector/rewardswidget.cpp
 		inspector/questwidget.cpp
 		inspector/heroskillswidget.cpp
+		inspector/PickObjectDelegate.cpp
+		inspector/portraitwidget.cpp
 		resourceExtractor/ResourceConverter.cpp
 )
 
@@ -58,6 +61,7 @@ set(editor_HEADERS
 		mapsettings/loseconditions.h
 		mapsettings/eventsettings.h
 		mapsettings/rumorsettings.h
+		mapsettings/translations.h
 		playersettings.h
 		playerparams.h
 		scenelayer.h
@@ -70,6 +74,8 @@ set(editor_HEADERS
 		inspector/rewardswidget.h
 		inspector/questwidget.h
 		inspector/heroskillswidget.h
+		inspector/PickObjectDelegate.h
+		inspector/portraitwidget.h
 		resourceExtractor/ResourceConverter.h
 )
 
@@ -85,6 +91,7 @@ set(editor_FORMS
 		mapsettings/loseconditions.ui
 		mapsettings/eventsettings.ui
 		mapsettings/rumorsettings.ui
+		mapsettings/translations.ui
 		playersettings.ui
 		playerparams.ui
 		validator.ui
@@ -94,9 +101,12 @@ set(editor_FORMS
 		inspector/rewardswidget.ui
 		inspector/questwidget.ui
 		inspector/heroskillswidget.ui
+		inspector/portraitwidget.ui
 )
 
 set(editor_TS
+	translation/chinese.ts
+	translation/czech.ts
 	translation/english.ts
 	translation/french.ts
 	translation/german.ts
@@ -178,8 +188,8 @@ enable_pch(vcmieditor)
 # Copy to build directory for easier debugging
 add_custom_command(TARGET vcmieditor POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/mapeditor/
-	COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_SOURCE_DIR}/mapeditor/icons ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/mapeditor/icons
-	COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/translation ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/mapeditor/translation
+	COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake_modules/create_link.cmake ${CMAKE_SOURCE_DIR}/mapeditor/icons ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/mapeditor/icons
+	COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake_modules/create_link.cmake ${CMAKE_CURRENT_BINARY_DIR}/translation ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/mapeditor/translation
 )
 
 install(TARGETS vcmieditor DESTINATION ${BIN_DIR})

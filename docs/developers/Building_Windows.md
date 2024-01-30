@@ -10,7 +10,9 @@ Windows builds can be made in more than one way and with more than one tool. Thi
 - Git or git GUI, for example, SourceTree [download link](http://www.sourcetreeapp.com/download)
 - CMake [download link](https://cmake.org/download/). During install after accepting license agreement make sure to check "Add CMake to the system PATH for all users".
 - To unpack pre-build Vcpkg: [7-zip](http://www.7-zip.org/download.html)
-- Optionally, to create installer: [NSIS](http://nsis.sourceforge.net/Main_Page)
+- Optional:
+    - To create installer: [NSIS](http://nsis.sourceforge.net/Main_Page)
+    - To speed up recompilation: [CCache](https://github.com/ccache/ccache/releases)
 
 ## Choose an installation directory
 
@@ -75,6 +77,10 @@ From command line use:
 
 For the list of the packages used you can also consult [vcmi-deps-windows readme](https://github.com/vcmi/vcmi-deps-windows) in case this article gets outdated a bit.
 
+# Install CCache
+
+Extract `ccache` to a folder of your choosing, add the folder to the `PATH` environment variable and log out and back in.
+
 # Build VCMI
 
 #### From GIT GUI
@@ -97,9 +103,21 @@ For the list of the packages used you can also consult [vcmi-deps-windows readme
 
 ## Compile VCMI with Visual Studio
 - Open `%VCMI_DIR%/build/VCMI.sln` in Visual Studio
-- Select `Release` build type in combobox
+- Select `Release` build type in the combobox
+- If you want to use ccache:
+    - Select `Manage Configurations...` in the combobox
+    - Specify the following CMake variable: `ENABLE_CCACHE=ON`
+    - See the [Visual Studio documentation](https://learn.microsoft.com/en-us/cpp/build/customize-cmake-settings?view=msvc-170#cmake-variables-and-cache) for details
 - Right click on `BUILD_ALL` project. This `BUILD_ALL` project should be in `CMakePredefinedTargets` tree in Solution Explorer.
 - VCMI will be built in `%VCMI_DIR%/build/bin` folder!
+
+## Compile VCMI with MinGW via MSYS2
+- Install MSYS2 from https://www.msys2.org/
+- Start the `MSYS MinGW x64`-shell
+- Install dependencies: `pacman -S mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_image mingw-w64-x86_64-SDL2_mixer mingw-w64-x86_64-SDL2_ttf mingw-w64-x86_64-boost mingw-w64-x86_64-gcc mingw-w64-x86_64-ninja mingw-w64-x86_64-qt5-static`
+- Generate and build solution from VCMI-root dir: `cmake --preset windows-mingw-release && cmake --build --preset windows-mingw-release`
+
+**NOTE:** This will link Qt5 statically to `VCMI_launcher.exe` and `VCMI_Mapeditor.exe`. See [PR #3421](https://github.com/vcmi/vcmi/pull/3421) for some background.
 
 # Create VCMI installer (This step is not required for just building & development)
 

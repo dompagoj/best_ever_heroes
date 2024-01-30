@@ -15,15 +15,17 @@
 #include "client/CPlayerInterface.h"
 #include "client/Client.h"
 #include "lib/mapping/CMap.h"
+#include "lib/mapObjects/CGHeroInstance.h"
+#include "lib/mapObjects/CGTownInstance.h"
 #include "lib/CBuildingHandler.h"
 #include "lib/CGeneralTextHandler.h"
 #include "lib/CHeroHandler.h"
-#include "lib/NetPacks.h"
 #include "lib/CArtHandler.h"
 #include "lib/GameConstants.h"
 #include "lib/CPlayerState.h"
 #include "lib/UnlockGuard.h"
 #include "lib/battle/BattleInfo.h"
+#include "lib/networkPacks/PacksForServer.h"
 
 bool CCallback::teleportHero(const CGHeroInstance *who, const CGTownInstance *where)
 {
@@ -236,12 +238,12 @@ void CCallback::buyArtifact(const CGHeroInstance *hero, ArtifactID aid)
 	sendRequest(&pack);
 }
 
-void CCallback::trade(const IMarket * market, EMarketMode mode, ui32 id1, ui32 id2, ui32 val1, const CGHeroInstance * hero)
+void CCallback::trade(const IMarket * market, EMarketMode mode, TradeItemSell id1, TradeItemBuy id2, ui32 val1, const CGHeroInstance * hero)
 {
-	trade(market, mode, std::vector<ui32>(1, id1), std::vector<ui32>(1, id2), std::vector<ui32>(1, val1), hero);
+	trade(market, mode, std::vector(1, id1), std::vector(1, id2), std::vector(1, val1), hero);
 }
 
-void CCallback::trade(const IMarket * market, EMarketMode mode, const std::vector<ui32> & id1, const std::vector<ui32> & id2, const std::vector<ui32> & val1, const CGHeroInstance * hero)
+void CCallback::trade(const IMarket * market, EMarketMode mode, const std::vector<TradeItemSell> & id1, const std::vector<TradeItemBuy> & id2, const std::vector<ui32> & val1, const CGHeroInstance * hero)
 {
 	TradeOnMarketplace pack;
 	pack.marketId = dynamic_cast<const CGObjectInstance *>(market)->id;
@@ -253,18 +255,18 @@ void CCallback::trade(const IMarket * market, EMarketMode mode, const std::vecto
 	sendRequest(&pack);
 }
 
-void CCallback::setFormation(const CGHeroInstance * hero, bool tight)
+void CCallback::setFormation(const CGHeroInstance * hero, EArmyFormation mode)
 {
-	SetFormation pack(hero->id,tight);
+	SetFormation pack(hero->id, mode);
 	sendRequest(&pack);
 }
 
-void CCallback::recruitHero(const CGObjectInstance *townOrTavern, const CGHeroInstance *hero)
+void CCallback::recruitHero(const CGObjectInstance *townOrTavern, const CGHeroInstance *hero, const HeroTypeID & nextHero)
 {
 	assert(townOrTavern);
 	assert(hero);
 
-	HireHero pack(HeroTypeID(hero->subID), townOrTavern->id);
+	HireHero pack(hero->getHeroType(), townOrTavern->id, nextHero);
 	pack.player = *player;
 	sendRequest(&pack);
 }
@@ -274,6 +276,19 @@ void CCallback::save( const std::string &fname )
 	cl->save(fname);
 }
 
+void CCallback::gamePause(bool pause)
+{
+	if(pause)
+	{
+		GamePause pack;
+		pack.player = *player;
+		sendRequest(&pack);
+	}
+	else
+	{
+		sendQueryReply(0, QueryID::CLIENT);
+	}
+}
 
 void CCallback::sendMessage(const std::string &mess, const CGObjectInstance * currentObject)
 {
@@ -391,7 +406,10 @@ std::optional<BattleAction> CBattleCallback::makeSurrenderRetreatDecision(const 
 
 std::shared_ptr<CPlayerBattleCallback> CBattleCallback::getBattle(const BattleID & battleID)
 {
-	return activeBattles.at(battleID);
+	if (activeBattles.count(battleID))
+		return activeBattles.at(battleID);
+
+	throw std::runtime_error("Failed to find battle " + std::to_string(battleID.getNum()) + " of player " + player->toString() + ". Number of ongoing battles: " + std::to_string(activeBattles.size()));
 }
 
 std::optional<PlayerColor> CBattleCallback::getPlayerID() const
@@ -401,10 +419,18 @@ std::optional<PlayerColor> CBattleCallback::getPlayerID() const
 
 void CBattleCallback::onBattleStarted(const IBattleInfo * info)
 {
+	if (activeBattles.count(info->getBattleID()) > 0)
+		throw std::runtime_error("Player " + player->toString() + " is already engaged in battle " + std::to_string(info->getBattleID().getNum()));
+
+	logGlobal->debug("Battle %d started for player %s", info->getBattleID(), player->toString());
 	activeBattles[info->getBattleID()] = std::make_shared<CPlayerBattleCallback>(info, *getPlayerID());
 }
 
 void CBattleCallback::onBattleEnded(const BattleID & battleID)
 {
+	if (activeBattles.count(battleID) == 0)
+		throw std::runtime_error("Player " + player->toString() + " is not engaged in battle " + std::to_string(battleID.getNum()));
+
+	logGlobal->debug("Battle %d ended for player %s", battleID, player->toString());
 	activeBattles.erase(battleID);
 }

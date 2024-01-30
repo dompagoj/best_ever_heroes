@@ -39,11 +39,14 @@ public:
 	virtual ~CStackBasicDescriptor() = default;
 
 	const Creature * getType() const;
+	CreatureID getId() const;
 	TQuantity getCount() const;
 
 	virtual void setType(const CCreature * c);
+	
+	friend bool operator== (const CStackBasicDescriptor & l, const CStackBasicDescriptor & r);
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		if(h.saving)
 		{
@@ -82,7 +85,7 @@ public:
 	const CArmedInstance * const & armyObj; //stack must be part of some army, army must be part of some object
 	TExpType experience;//commander needs same amount of exp as hero
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CBonusSystemNode&>(*this);
 		h & static_cast<CStackBasicDescriptor&>(*this);
@@ -154,7 +157,7 @@ public:
 	int getLevel() const override;
 	ArtBearer::ArtBearer bearerType() const override; //from CArtifactSet
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CStackInstance&>(*this);
 		h & alive;
@@ -194,16 +197,10 @@ public:
 	bool setCreature(SlotID slot, CreatureID cre, TQuantity count) override;
 	operator bool() const;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & army;
 	}
-};
-
-enum class EArmyFormation : uint8_t
-{
-	LOOSE,
-	TIGHT
 };
 
 namespace NArmyFormation
@@ -232,7 +229,7 @@ public:
 	void addToSlot(const SlotID & slot, const CreatureID & cre, TQuantity count, bool allowMerging = true); //Adds stack to slot. Slot must be empty or with same type creature
 	void addToSlot(const SlotID & slot, CStackInstance * stack, bool allowMerging = true); //Adds stack to slot. Slot must be empty or with same type creature
 	void clearSlots() override;
-	void setFormation(bool tight);
+	void setFormation(EArmyFormation tight);
 	CArmedInstance *castToArmyObj();
 
 	//basic operations
@@ -251,7 +248,7 @@ public:
 	void setToArmy(CSimpleArmy &src); //erases all our army and moves stacks from src to us; src MUST NOT be an armed object! WARNING: use it wisely. Or better do not use at all.
 
 	const CStackInstance & getStack(const SlotID & slot) const; //stack must exist
-	const CStackInstance * getStackPtr(const SlotID & slot) const; //if stack doesn't exist, returns nullptr
+	CStackInstance * getStackPtr(const SlotID & slot) const; //if stack doesn't exist, returns nullptr
 	const CCreature * getCreature(const SlotID & slot) const; //workaround of map issue;
 	int getStackCount(const SlotID & slot) const;
 	TExpType getStackExperience(const SlotID & slot) const;
@@ -283,7 +280,7 @@ public:
 	bool contains(const CStackInstance *stack) const;
 	bool canBeMergedWith(const CCreatureSet &cs, bool allowMergingStacks = true) const;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & stacks;
 		h & formation;

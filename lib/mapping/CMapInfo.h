@@ -28,8 +28,9 @@ public:
 	std::unique_ptr<Campaign> campaign; //may be nullptr if scenario
 	StartInfo * scenarioOptionsOfSave; // Options with which scenario has been started (used only with saved games)
 	std::string fileURI;
-	std::string originalFileURI;
-	std::string fullFileURI;
+	std::string originalFileURI; // no need to serialize
+	std::string fullFileURI; // no need to serialize
+	std::time_t lastWrite; // no need to serialize
 	std::string date;
 	int amountOfPlayersOnMap;
 	int amountOfHumanControllablePlayers;
@@ -49,15 +50,15 @@ public:
 	void saveInit(const ResourcePath & file);
 	void campaignInit();
 	void countPlayers();
-	// TODO: Those must be on client-side
-	std::string getName() const;
+	
+	std::string getNameTranslated() const;
 	std::string getNameForList() const;
-	std::string getDescription() const;
+	std::string getDescriptionTranslated() const;
 	int getMapSizeIconId() const;
 	int getMapSizeFormatIconId() const;
 	std::string getMapSizeName() const;
 
-	template <typename Handler> void serialize(Handler &h, const int Version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & mapHeader;
 		h & campaign;

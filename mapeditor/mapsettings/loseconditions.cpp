@@ -117,7 +117,7 @@ void LoseConditions::initialize(MapController & c)
 void LoseConditions::update()
 {
 	//loss messages
-	controller->map()->defeatMessage = MetaString::createFromRawString(ui->defeatMessageEdit->text().toStdString());
+	bool customMessage = true;
 
 	//loss conditions
 	EventCondition defeatCondition(EventCondition::DAYS_WITHOUT_TOWN);
@@ -138,6 +138,7 @@ void LoseConditions::update()
 		controller->map()->triggeredEvents.push_back(standardDefeat);
 		controller->map()->defeatIconIndex = 3;
 		controller->map()->defeatMessage = MetaString::createFromTextID("core.lcdesc.0");
+		customMessage = false;
 	}
 	else
 	{
@@ -155,7 +156,7 @@ void LoseConditions::update()
 			case 0: {
 				EventExpression::OperatorNone noneOf;
 				EventCondition cond(EventCondition::CONTROL);
-				cond.objectType = Obj::TOWN;
+				cond.objectType = Obj(Obj::TOWN);
 				assert(loseTypeWidget);
 				int townIdx = loseTypeWidget->currentData().toInt();
 				cond.position = controller->map()->objects[townIdx]->pos;
@@ -163,13 +164,14 @@ void LoseConditions::update()
 				specialDefeat.onFulfill.appendTextID("core.genrltxt.251");
 				specialDefeat.trigger = EventExpression(noneOf);
 				controller->map()->defeatMessage = MetaString::createFromTextID("core.lcdesc.1");
+				customMessage = false;
 				break;
 			}
 
 			case 1: {
 				EventExpression::OperatorNone noneOf;
 				EventCondition cond(EventCondition::CONTROL);
-				cond.objectType = Obj::HERO;
+				cond.objectType = Obj(Obj::HERO);
 				assert(loseTypeWidget);
 				int townIdx = loseTypeWidget->currentData().toInt();
 				cond.position = controller->map()->objects[townIdx]->pos;
@@ -177,6 +179,7 @@ void LoseConditions::update()
 				specialDefeat.onFulfill.appendTextID("core.genrltxt.253");
 				specialDefeat.trigger = EventExpression(noneOf);
 				controller->map()->defeatMessage = MetaString::createFromTextID("core.lcdesc.2");
+				customMessage = false;
 				break;
 			}
 
@@ -187,6 +190,7 @@ void LoseConditions::update()
 				specialDefeat.onFulfill.appendTextID("core.genrltxt.254");
 				specialDefeat.trigger = EventExpression(cond);
 				controller->map()->defeatMessage = MetaString::createFromTextID("core.lcdesc.3");
+				customMessage = false;
 				break;
 			}
 
@@ -215,6 +219,10 @@ void LoseConditions::update()
 		controller->map()->triggeredEvents.push_back(specialDefeat);
 	}
 
+	if(customMessage)
+	{
+		controller->map()->defeatMessage = MetaString::createFromTextID(mapRegisterLocalizedString("map", *controller->map(), TextIdentifier("header", "defeatMessage"), ui->defeatMessageEdit->text().toStdString()));
+	}
 }
 
 void LoseConditions::on_loseComboBox_currentIndexChanged(int index)
@@ -243,7 +251,7 @@ void LoseConditions::on_loseComboBox_currentIndexChanged(int index)
 			loseTypeWidget = new QComboBox;
 			ui->loseParamsLayout->addWidget(loseTypeWidget);
 			for(int i : getObjectIndexes<const CGTownInstance>(*controller->map()))
-				loseTypeWidget->addItem(tr(getTownName(*controller->map(), i).c_str()), QVariant::fromValue(i));
+				loseTypeWidget->addItem(QString::fromStdString(getTownName(*controller->map(), i).c_str()), QVariant::fromValue(i));
 			pickObjectButton = new QToolButton;
 			connect(pickObjectButton, &QToolButton::clicked, this, &LoseConditions::onObjectSelect);
 			ui->loseParamsLayout->addWidget(pickObjectButton);
@@ -254,7 +262,7 @@ void LoseConditions::on_loseComboBox_currentIndexChanged(int index)
 			loseTypeWidget = new QComboBox;
 			ui->loseParamsLayout->addWidget(loseTypeWidget);
 			for(int i : getObjectIndexes<const CGHeroInstance>(*controller->map()))
-				loseTypeWidget->addItem(tr(getHeroName(*controller->map(), i).c_str()), QVariant::fromValue(i));
+				loseTypeWidget->addItem(QString::fromStdString(getHeroName(*controller->map(), i).c_str()), QVariant::fromValue(i));
 			pickObjectButton = new QToolButton;
 			connect(pickObjectButton, &QToolButton::clicked, this, &LoseConditions::onObjectSelect);
 			ui->loseParamsLayout->addWidget(pickObjectButton);

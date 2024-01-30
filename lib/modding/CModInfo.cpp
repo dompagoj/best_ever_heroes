@@ -22,6 +22,16 @@ static JsonNode addMeta(JsonNode config, const std::string & meta)
 	return config;
 }
 
+std::set<TModID> CModInfo::readModList(const JsonNode & input)
+{
+	std::set<TModID> result;
+
+	for (auto const & string : input.convertTo<std::set<std::string>>())
+		result.insert(boost::to_lower_copy(string));
+
+	return result;
+}
+
 CModInfo::CModInfo():
 	explicitlyEnabled(false),
 	implicitlyEnabled(true),
@@ -32,20 +42,23 @@ CModInfo::CModInfo():
 
 CModInfo::CModInfo(const std::string & identifier, const JsonNode & local, const JsonNode & config):
 	identifier(identifier),
-	description(config["description"].String()),
-	dependencies(config["depends"].convertTo<std::set<std::string>>()),
-	conflicts(config["conflicts"].convertTo<std::set<std::string>>()),
+	dependencies(readModList(config["depends"])),
+	conflicts(readModList(config["conflicts"])),
 	explicitlyEnabled(false),
 	implicitlyEnabled(true),
 	validation(PENDING),
 	config(addMeta(config, identifier))
 {
-	verificationInfo.name = config["name"].String();
+	if (!config["name"].String().empty())
+		verificationInfo.name = config["name"].String();
+	else
+		verificationInfo.name = identifier;
+
 	verificationInfo.version = CModVersion::fromString(config["version"].String());
 	verificationInfo.parent = identifier.substr(0, identifier.find_last_of('.'));
 	if(verificationInfo.parent == identifier)
 		verificationInfo.parent.clear();
-	
+
 	if(!config["compatibility"].isNull())
 	{
 		vcmiCompatibleMin = CModVersion::fromString(config["compatibility"]["min"].String());
@@ -98,11 +111,7 @@ void CModInfo::loadLocalData(const JsonNode & data)
 	implicitlyEnabled = true;
 	explicitlyEnabled = !config["keepDisabled"].Bool();
 	verificationInfo.checksum = 0;
-	if (data.getType() == JsonNode::JsonType::DATA_BOOL)
-	{
-		explicitlyEnabled = data.Bool();
-	}
-	if (data.getType() == JsonNode::JsonType::DATA_STRUCT)
+	if (data.isStruct())
 	{
 		explicitlyEnabled = data["active"].Bool();
 		validated = data["validated"].Bool();
@@ -116,20 +125,27 @@ void CModInfo::loadLocalData(const JsonNode & data)
 	if(!implicitlyEnabled)
 		logGlobal->warn("Mod %s is incompatible with current version of VCMI and cannot be enabled", verificationInfo.name);
 
-	if (boost::iequals(config["modType"].String(), "translation")) // compatibility code - mods use "Translation" type at the moment
+	if (config["modType"].String() == "Translation")
 	{
-		if (baseLanguage != VLC->generaltexth->getPreferredLanguage())
+		if (baseLanguage != CGeneralTextHandler::getPreferredLanguage())
 		{
-			logGlobal->warn("Translation mod %s was not loaded: language mismatch!", verificationInfo.name);
+			if (identifier.find_last_of('.') == std::string::npos)
+				logGlobal->warn("Translation mod %s was not loaded: language mismatch!", verificationInfo.name);
 			implicitlyEnabled = false;
 		}
+	}
+	if (config["modType"].String() == "Compatibility")
+	{
+		// compatibility mods are always explicitly enabled
+		// however they may be implicitly disabled - if one of their dependencies is missing
+		explicitlyEnabled = true;
 	}
 
 	if (isEnabled())
 		validation = validated ? PASSED : PENDING;
 	else
 		validation = validated ? PASSED : FAILED;
-	
+
 	verificationInfo.impactsGameplay = checkModGameplayAffecting();
 }
 
@@ -175,19 +191,15 @@ bool CModInfo::checkModGameplayAffecting() const
 	return *modGameplayAffecting;
 }
 
-const CModInfo::VerificationInfo & CModInfo::getVerificationInfo() const
+const ModVerificationInfo & CModInfo::getVerificationInfo() const
 {
+	assert(!verificationInfo.name.empty());
 	return verificationInfo;
 }
 
 bool CModInfo::isEnabled() const
 {
 	return implicitlyEnabled && explicitlyEnabled;
-}
-
-void CModInfo::setEnabled(bool on)
-{
-	explicitlyEnabled = on;
 }
 
 VCMI_LIB_NAMESPACE_END

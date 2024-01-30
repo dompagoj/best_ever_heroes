@@ -10,6 +10,7 @@
 #pragma once
 
 #include "CDefaultObjectTypeHandler.h"
+#include "../mapObjects/MiscObjects.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -24,11 +25,6 @@ protected:
 	void initializeObject(HillFort * object) const override;
 
 public:
-	template <typename Handler> void serialize(Handler &h, const int version)
-	{
-		h & static_cast<AObjectTypeHandler&>(*this);
-		h & parameters;
-	}
 };
 
 VCMI_LIB_NAMESPACE_END

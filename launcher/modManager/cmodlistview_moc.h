@@ -54,17 +54,20 @@ class CModListView : public QWidget
 	void downloadFile(QString file, QString url, QString description, qint64 size = 0);
 
 	void installMods(QStringList archives);
+	void installMaps(QStringList maps);
 	void installFiles(QStringList mods);
 
 	QString genChangelogText(CModEntry & mod);
 	QString genModInfoText(CModEntry & mod);
 
 	void changeEvent(QEvent *event) override;
+	void dragEnterEvent(QDragEnterEvent* event) override;
+	void dropEvent(QDropEvent *event) override;
 signals:
 	void modsChanged();
 
 public:
-	explicit CModListView(QWidget * parent = 0);
+	explicit CModListView(QWidget * parent = nullptr);
 	~CModListView();
 
 	void loadScreenshots();
@@ -98,6 +101,7 @@ private slots:
 	void dataChanged(const QModelIndex & topleft, const QModelIndex & bottomRight);
 	void modSelected(const QModelIndex & current, const QModelIndex & previous);
 	void downloadProgress(qint64 current, qint64 max);
+	void extractionProgress(qint64 current, qint64 max);
 	void downloadFinished(QStringList savedFiles, QStringList failedFiles, QStringList errors);
 	void modelReset();
 	void hideProgressBar();

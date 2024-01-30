@@ -25,7 +25,7 @@ public:
 	std::string title;
 	std::string speech; //currently shown only in university
 	
-	CGMarket();
+	CGMarket(IGameCallback *cb);
 	///IObjectInterface
 	void onHeroVisit(const CGHeroInstance * h) const override; //open trading window
 	void initObj(CRandomGenerator & rand) override;//set skills for trade
@@ -34,9 +34,9 @@ public:
 	int getMarketEfficiency() const override;
 	bool allowsTrade(EMarketMode mode) const override;
 	int availableUnits(EMarketMode mode, int marketItemSerial) const override; //-1 if unlimited
-	std::vector<int> availableItemsIds(EMarketMode mode) const override;
+	std::vector<TradeItemBuy> availableItemsIds(EMarketMode mode) const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGObjectInstance&>(*this);
 		h & marketModes;
@@ -49,12 +49,14 @@ public:
 class DLL_LINKAGE CGBlackMarket : public CGMarket
 {
 public:
+	using CGMarket::CGMarket;
+
 	std::vector<const CArtifact *> artifacts; //available artifacts
 
 	void newTurn(CRandomGenerator & rand) const override; //reset artifacts for black market every month
-	std::vector<int> availableItemsIds(EMarketMode mode) const override;
+	std::vector<TradeItemBuy> availableItemsIds(EMarketMode mode) const override;
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGMarket&>(*this);
 		h & artifacts;
@@ -64,13 +66,14 @@ public:
 class DLL_LINKAGE CGUniversity : public CGMarket
 {
 public:
-	std::vector<int> skills; //available skills
+	using CGMarket::CGMarket;
 
-	std::vector<int> availableItemsIds(EMarketMode mode) const override;
-	void initObj(CRandomGenerator & rand) override;//set skills for trade
+	std::vector<TradeItemBuy> skills; //available skills
+
+	std::vector<TradeItemBuy> availableItemsIds(EMarketMode mode) const override;
 	void onHeroVisit(const CGHeroInstance * h) const override; //open window
 
-	template <typename Handler> void serialize(Handler &h, const int version)
+	template <typename Handler> void serialize(Handler &h)
 	{
 		h & static_cast<CGMarket&>(*this);
 		h & skills;

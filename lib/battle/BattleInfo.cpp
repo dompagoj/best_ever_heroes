@@ -9,11 +9,11 @@
  */
 #include "StdInc.h"
 #include "BattleInfo.h"
+#include "CObstacleInstance.h"
 #include "bonuses/Limiters.h"
 #include "bonuses/Updaters.h"
 #include "../CStack.h"
 #include "../CHeroHandler.h"
-#include "../NetPacks.h"
 #include "../filesystem/Filesystem.h"
 #include "../mapObjects/CGTownInstance.h"
 #include "../CGeneralTextHandler.h"
@@ -154,7 +154,8 @@ struct RangeGenerator
 		return ret;
 	}
 
-	int min, remainingCount;
+	int min;
+	int remainingCount;
 	std::vector<bool> remaining;
 	std::function<int()> myRand;
 };
@@ -239,7 +240,7 @@ BattleInfo * BattleInfo::setupBattle(const int3 & tile, TerrainId terrain, const
 		{
 			try
 			{
-				RangeGenerator obidgen(0, VLC->obstacleHandler->objects.size() - 1, ourRand);
+				RangeGenerator obidgen(0, VLC->obstacleHandler->size() - 1, ourRand);
 				auto obstPtr = std::make_shared<CObstacleInstance>();
 				obstPtr->obstacleType = CObstacleInstance::ABSOLUTE_OBSTACLE;
 				obstPtr->ID = obidgen.getSuchNumber(appropriateAbsoluteObstacle);
@@ -253,7 +254,7 @@ BattleInfo * BattleInfo::setupBattle(const int3 & tile, TerrainId terrain, const
 			catch(RangeGenerator::ExhaustedPossibilities &)
 			{
 				//silently ignore, if we can't place absolute obstacle, we'll go with the usual ones
-				logGlobal->debug("RangeGenerator::ExhaustedPossibilities exception occured - cannot place absolute obstacle");
+				logGlobal->debug("RangeGenerator::ExhaustedPossibilities exception occurred - cannot place absolute obstacle");
 			}
 		}
 
@@ -261,7 +262,7 @@ BattleInfo * BattleInfo::setupBattle(const int3 & tile, TerrainId terrain, const
 		{
 			while(tilesToBlock > 0)
 			{
-				RangeGenerator obidgen(0, VLC->obstacleHandler->objects.size() - 1, ourRand);
+				RangeGenerator obidgen(0, VLC->obstacleHandler->size() - 1, ourRand);
 				auto tileAccessibility = curB->getAccesibility();
 				const int obid = obidgen.getSuchNumber(appropriateUsualObstacle);
 				const ObstacleInfo &obi = *Obstacle(obid).getInfo();
@@ -306,7 +307,7 @@ BattleInfo * BattleInfo::setupBattle(const int3 & tile, TerrainId terrain, const
 		}
 		catch(RangeGenerator::ExhaustedPossibilities &)
 		{
-			logGlobal->debug("RangeGenerator::ExhaustedPossibilities exception occured - cannot place usual obstacle");
+			logGlobal->debug("RangeGenerator::ExhaustedPossibilities exception occurred - cannot place usual obstacle");
 		}
 	}
 
@@ -442,9 +443,9 @@ BattleInfo * BattleInfo::setupBattle(const int3 & tile, TerrainId terrain, const
 	//native terrain bonuses
 	static auto nativeTerrain = std::make_shared<CreatureTerrainLimiter>();
 	
-	curB->addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::STACKS_SPEED, BonusSource::TERRAIN_NATIVE, 1, 0, 0)->addLimiter(nativeTerrain));
-	curB->addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::PRIMARY_SKILL, BonusSource::TERRAIN_NATIVE, 1, 0, static_cast<int>(PrimarySkill::ATTACK))->addLimiter(nativeTerrain));
-	curB->addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::PRIMARY_SKILL, BonusSource::TERRAIN_NATIVE, 1, 0, static_cast<int>(PrimarySkill::DEFENSE))->addLimiter(nativeTerrain));
+	curB->addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::STACKS_SPEED, BonusSource::TERRAIN_NATIVE, 1,  BonusSourceID())->addLimiter(nativeTerrain));
+	curB->addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::PRIMARY_SKILL, BonusSource::TERRAIN_NATIVE, 1, BonusSourceID(), BonusSubtypeID(PrimarySkill::ATTACK))->addLimiter(nativeTerrain));
+	curB->addNewBonus(std::make_shared<Bonus>(BonusDuration::ONE_BATTLE, BonusType::PRIMARY_SKILL, BonusSource::TERRAIN_NATIVE, 1, BonusSourceID(), BonusSubtypeID(PrimarySkill::DEFENSE))->addLimiter(nativeTerrain));
 	//////////////////////////////////////////////////////////////////////////
 
 	//tactics
@@ -562,14 +563,14 @@ int32_t BattleInfo::getActiveStackID() const
 	return activeStack;
 }
 
-TStacks BattleInfo::getStacksIf(TStackFilter predicate) const
+TStacks BattleInfo::getStacksIf(const TStackFilter & predicate) const
 {
 	TStacks ret;
 	vstd::copy_if(stacks, std::back_inserter(ret), predicate);
 	return ret;
 }
 
-battle::Units BattleInfo::getUnitsIf(battle::UnitFilter predicate) const
+battle::Units BattleInfo::getUnitsIf(const battle::UnitFilter & predicate) const
 {
 	battle::Units ret;
 	vstd::copy_if(stacks, std::back_inserter(ret), predicate);
@@ -802,7 +803,7 @@ void BattleInfo::setUnitState(uint32_t id, const JsonNode & data, int64_t health
 		auto selector = [](const Bonus * b)
 		{
 			//Special case: DISRUPTING_RAY is absolutely permanent
-			return b->source == BonusSource::SPELL_EFFECT && b->sid != SpellID::DISRUPTING_RAY;
+			return b->source == BonusSource::SPELL_EFFECT && b->sid.as<SpellID>() != SpellID::DISRUPTING_RAY;
 		};
 		changedStack->removeBonusesRecursive(selector);
 	}
@@ -956,14 +957,14 @@ void BattleInfo::setWallState(EWallPart partOfWall, EWallState state)
 
 void BattleInfo::addObstacle(const ObstacleChanges & changes)
 {
-	std::shared_ptr<SpellCreatedObstacle> obstacle = std::make_shared<SpellCreatedObstacle>();
+	auto obstacle = std::make_shared<SpellCreatedObstacle>();
 	obstacle->fromInfo(changes);
 	obstacles.push_back(obstacle);
 }
 
 void BattleInfo::updateObstacle(const ObstacleChanges& changes)
 {
-	std::shared_ptr<SpellCreatedObstacle> changedObstacle = std::make_shared<SpellCreatedObstacle>();
+	auto changedObstacle = std::make_shared<SpellCreatedObstacle>();
 	changedObstacle->fromInfo(changes);
 
 	for(auto & obstacle : obstacles)
@@ -1008,7 +1009,7 @@ scripting::Pool * BattleInfo::getContextPool() const
 {
 	//this is real battle, use global scripting context pool
 	//TODO: make this line not ugly
-	return IObjectInterface::cb->getGlobalContextPool();
+	return battleGetFightingHero(0)->cb->getGlobalContextPool();
 }
 #endif
 

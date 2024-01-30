@@ -47,14 +47,16 @@ void CLabel::showAll(Canvas & to)
 
 }
 
-CLabel::CLabel(int x, int y, EFonts Font, ETextAlignment Align, const ColorRGBA & Color, const std::string & Text)
-	: CTextContainer(Align, Font, Color), text(Text)
+CLabel::CLabel(int x, int y, EFonts Font, ETextAlignment Align, const ColorRGBA & Color, const std::string & Text, int maxWidth)
+	: CTextContainer(Align, Font, Color), text(Text), maxWidth(maxWidth)
 {
 	setRedrawParent(true);
 	autoRedraw = true;
 	pos.x += x;
 	pos.y += y;
 	pos.w = pos.h = 0;
+
+	trimText();
 
 	if(alignment == ETextAlignment::TOPLEFT) // causes issues for MIDDLE
 	{
@@ -81,6 +83,9 @@ void CLabel::setAutoRedraw(bool value)
 void CLabel::setText(const std::string & Txt)
 {
 	text = Txt;
+	
+	trimText();
+
 	if(autoRedraw)
 	{
 		if(background || !parent)
@@ -88,6 +93,18 @@ void CLabel::setText(const std::string & Txt)
 		else
 			parent->redraw();
 	}
+}
+
+void CLabel::setMaxWidth(int width)
+{
+	maxWidth = width;
+}
+
+void CLabel::trimText()
+{
+	if(maxWidth > 0)
+		while ((int)graphics->fonts[font]->getStringWidth(visibleText().c_str()) > maxWidth)
+			TextOperations::trimRightUnicode(text);
 }
 
 void CLabel::setColor(const ColorRGBA & Color)
@@ -104,7 +121,7 @@ void CLabel::setColor(const ColorRGBA & Color)
 
 size_t CLabel::getWidth()
 {
-	return graphics->fonts[font]->getStringWidth(visibleText());;
+	return graphics->fonts[font]->getStringWidth(visibleText());
 }
 
 CMultiLineLabel::CMultiLineLabel(Rect position, EFonts Font, ETextAlignment Align, const ColorRGBA & Color, const std::string & Text) :
@@ -375,18 +392,20 @@ void CTextBox::setText(const std::string & text)
 	else if(slider)
 	{
 		// decrease width again if slider still used
-		label->pos.w = pos.w - 32;
+		label->pos.w = pos.w - 16;
+		assert(label->pos.w > 0);
 		label->setText(text);
 		slider->setAmount(label->textSize.y);
 	}
 	else if(label->textSize.y > label->pos.h)
 	{
 		// create slider and update widget
-		label->pos.w = pos.w - 32;
+		label->pos.w = pos.w - 16;
+		assert(label->pos.w > 0);
 		label->setText(text);
 
 		OBJECT_CONSTRUCTION_CUSTOM_CAPTURING(255 - DISPOSE);
-		slider = std::make_shared<CSlider>(Point(pos.w - 32, 0), pos.h, std::bind(&CTextBox::sliderMoved, this, _1),
+		slider = std::make_shared<CSlider>(Point(pos.w - 16, 0), pos.h, std::bind(&CTextBox::sliderMoved, this, _1),
 			label->pos.h, label->textSize.y, 0, Orientation::VERTICAL, CSlider::EStyle(sliderStyle));
 		slider->setScrollStep((int)graphics->fonts[label->font]->getLineHeight());
 		slider->setPanningStep(1);
@@ -442,7 +461,7 @@ void CGStatusBar::clear()
 }
 
 CGStatusBar::CGStatusBar(std::shared_ptr<CIntObject> background_, EFonts Font, ETextAlignment Align, const ColorRGBA & Color)
-	: CLabel(background_->pos.x, background_->pos.y, Font, Align, Color, "")
+	: CLabel(background_->pos.x, background_->pos.y, Font, Align, Color, "", background_->pos.w)
 	, enteringText(false)
 {
 	addUsedEvents(LCLICK);
@@ -532,28 +551,30 @@ Point CGStatusBar::getBorderSize()
 	return Point();
 }
 
-CTextInput::CTextInput(const Rect & Pos, EFonts font, const CFunctionList<void(const std::string &)> & CB)
+CTextInput::CTextInput(const Rect & Pos, EFonts font, const CFunctionList<void(const std::string &)> & CB, bool giveFocusToInput)
 	: CLabel(Pos.x, Pos.y, font, ETextAlignment::CENTER),
-	cb(CB),
-	CFocusable(std::make_shared<CKeyboardFocusListener>(this))
+	cb(CB)
 {
 	setRedrawParent(true);
 	pos.h = Pos.h;
 	pos.w = Pos.w;
+	maxWidth = Pos.w;
 	background.reset();
 	addUsedEvents(LCLICK | SHOW_POPUP | KEYBOARD | TEXTINPUT);
 
 #if !defined(VCMI_MOBILE)
-	giveFocus();
+	if(giveFocusToInput)
+		giveFocus();
 #endif
 }
 
 CTextInput::CTextInput(const Rect & Pos, const Point & bgOffset, const ImagePath & bgName, const CFunctionList<void(const std::string &)> & CB)
-	:cb(CB), 	CFocusable(std::make_shared<CKeyboardFocusListener>(this))
+	:cb(CB)
 {
 	pos += Pos.topLeft();
 	pos.h = Pos.h;
 	pos.w = Pos.w;
+	maxWidth = Pos.w;
 
 	OBJ_CONSTRUCTION;
 	background = std::make_shared<CPicture>(bgName, bgOffset.x, bgOffset.y);
@@ -565,13 +586,13 @@ CTextInput::CTextInput(const Rect & Pos, const Point & bgOffset, const ImagePath
 }
 
 CTextInput::CTextInput(const Rect & Pos, std::shared_ptr<IImage> srf)
-	:CFocusable(std::make_shared<CKeyboardFocusListener>(this))
 {
 	pos += Pos.topLeft();
 	OBJ_CONSTRUCTION;
 	background = std::make_shared<CPicture>(srf, Pos);
 	pos.w = background->pos.w;
 	pos.h = background->pos.h;
+	maxWidth = Pos.w;
 	background->pos = pos;
 	addUsedEvents(LCLICK | KEYBOARD | TEXTINPUT);
 
@@ -580,20 +601,15 @@ CTextInput::CTextInput(const Rect & Pos, std::shared_ptr<IImage> srf)
 #endif
 }
 
-std::atomic<int> CKeyboardFocusListener::usageIndex(0);
+std::atomic<int> CFocusable::usageIndex(0);
 
-CKeyboardFocusListener::CKeyboardFocusListener(CTextInput * textInput)
-	:textInput(textInput)
+void CFocusable::focusGot()
 {
-}
-
-void CKeyboardFocusListener::focusGot()
-{
-	GH.startTextInput(textInput->pos);
+	GH.startTextInput(pos);
 	usageIndex++;
 }
 
-void CKeyboardFocusListener::focusLost()
+void CFocusable::focusLost()
 {
 	if(0 == --usageIndex)
 	{
@@ -680,7 +696,7 @@ void CTextInput::textInputed(const std::string & enteredText)
 		return;
 	std::string oldText = text;
 
-	text += enteredText;
+	setText(getText() + enteredText);
 
 	filters(text, oldText);
 	if(text != oldText)
@@ -746,12 +762,6 @@ void CTextInput::numberFilter(std::string & text, const std::string & oldText, i
 }
 
 CFocusable::CFocusable()
-	:CFocusable(std::make_shared<IFocusListener>())
-{
-}
-
-CFocusable::CFocusable(std::shared_ptr<IFocusListener> focusListener)
-	: focusListener(focusListener)
 {
 	focus = false;
 	focusables.push_back(this);
@@ -762,7 +772,7 @@ CFocusable::~CFocusable()
 	if(hasFocus())
 	{
 		inputWithFocus = nullptr;
-		focusListener->focusLost();
+		focusLost();
 	}
 
 	focusables -= this;
@@ -776,13 +786,13 @@ bool CFocusable::hasFocus() const
 void CFocusable::giveFocus()
 {
 	focus = true;
-	focusListener->focusGot();
+	focusGot();
 	redraw();
 
 	if(inputWithFocus)
 	{
 		inputWithFocus->focus = false;
-		inputWithFocus->focusListener->focusLost();
+		inputWithFocus->focusLost();
 		inputWithFocus->redraw();
 	}
 
@@ -798,10 +808,25 @@ void CFocusable::moveFocus()
 		if(i == focusables.end())
 			i = focusables.begin();
 
+		if (*i == this)
+			return;
+
 		if((*i)->isActive())
 		{
 			(*i)->giveFocus();
 			break;
 		}
+	}
+}
+
+void CFocusable::removeFocus()
+{
+	if(this == inputWithFocus)
+	{
+		focus = false;
+		focusLost();
+		redraw();
+
+		inputWithFocus = nullptr;
 	}
 }

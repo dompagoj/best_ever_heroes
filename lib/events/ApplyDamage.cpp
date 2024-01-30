@@ -12,8 +12,7 @@
 #include <vcmi/Environment.h>
 
 #include "ApplyDamage.h"
-
-#include "../../lib/NetPacks.h"
+#include "../networkPacks/PacksForClientBattle.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -22,7 +21,7 @@ namespace events
 
 SubscriptionRegistry<ApplyDamage> * ApplyDamage::getRegistry()
 {
-	static std::unique_ptr<SubscriptionRegistry<ApplyDamage>> Instance = std::make_unique<SubscriptionRegistry<ApplyDamage>>();
+	static auto Instance = std::make_unique<SubscriptionRegistry<ApplyDamage>>();
 	return Instance.get();
 }
 

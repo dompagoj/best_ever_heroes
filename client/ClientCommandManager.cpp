@@ -18,7 +18,6 @@
 #include "gui/CGuiHandler.h"
 #include "gui/WindowHandler.h"
 #include "render/IRenderHandler.h"
-#include "../lib/NetPacks.h"
 #include "ClientNetPackVisitors.h"
 #include "../lib/CConfigHandler.h"
 #include "../lib/gameState/CGameState.h"
@@ -28,6 +27,7 @@
 #include "../lib/mapping/CMapService.h"
 #include "../lib/mapping/CMap.h"
 #include "windows/CCastleInterface.h"
+#include "../lib/mapObjects/CGHeroInstance.h"
 #include "render/CAnimation.h"
 #include "../CCallback.h"
 #include "../lib/CGeneralTextHandler.h"
@@ -74,7 +74,8 @@ void ClientCommandManager::handleGoSoloCommand()
 {
 	Settings session = settings.write["session"];
 
-	boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
+	boost::mutex::scoped_lock interfaceLock(GH.interfaceMutex);
+
 	if(!CSH->client)
 	{
 		printCommandMessage("Game is not in playing state");
@@ -120,7 +121,8 @@ void ClientCommandManager::handleControlaiCommand(std::istringstream& singleWord
 	singleWordBuffer >> colorName;
 	boost::to_lower(colorName);
 
-	boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
+	boost::mutex::scoped_lock interfaceLock(GH.interfaceMutex);
+
 	if(!CSH->client)
 	{
 		printCommandMessage("Game is not in playing state");
@@ -201,7 +203,7 @@ void ClientCommandManager::handleConvertTextCommand()
 		try
 		{
 			// load and drop loaded map - we only need loader to run over all maps
-			mapService.loadMap(mapName);
+			mapService.loadMap(mapName, nullptr);
 		}
 		catch(std::exception & e)
 		{
@@ -214,7 +216,7 @@ void ClientCommandManager::handleConvertTextCommand()
 	{
 		auto state = CampaignHandler::getCampaign(campaignName.getName());
 		for (auto const & part : state->allScenarios())
-			state->getMap(part);
+			state->getMap(part, nullptr);
 	}
 
 	VLC->generaltexth->dumpAllTexts();
@@ -270,7 +272,7 @@ void ClientCommandManager::handleGetScriptsCommand()
 
 	boost::filesystem::create_directories(outPath);
 
-	for(auto & kv : VLC->scriptHandler->objects)
+	for(const auto & kv : VLC->scriptHandler->objects)
 	{
 		std::string name = kv.first;
 		boost::algorithm::replace_all(name,":","_");
@@ -377,7 +379,8 @@ void ClientCommandManager::handleBonusesCommand(std::istringstream & singleWordB
 void ClientCommandManager::handleTellCommand(std::istringstream& singleWordBuffer)
 {
 	std::string what;
-	int id1, id2;
+	int id1;
+	int id2;
 	singleWordBuffer >> what >> id1 >> id2;
 
 	if(what == "hs")
@@ -397,7 +400,8 @@ void ClientCommandManager::handleMpCommand()
 
 void ClientCommandManager::handleSetCommand(std::istringstream& singleWordBuffer)
 {
-	std::string what, value;
+	std::string what;
+	std::string value;
 	singleWordBuffer >> what;
 
 	Settings config = settings.write["session"][what];
@@ -414,14 +418,6 @@ void ClientCommandManager::handleSetCommand(std::istringstream& singleWordBuffer
 		config->Bool() = false;
 		printCommandMessage("Option " + what + " disabled!", ELogLevel::INFO);
 	}
-}
-
-void ClientCommandManager::handleUnlockCommand(std::istringstream& singleWordBuffer)
-{
-	std::string mxname;
-	singleWordBuffer >> mxname;
-	if(mxname == "pim" && LOCPLINT)
-		LOCPLINT->pim->unlock();
 }
 
 void ClientCommandManager::handleCrashCommand()
@@ -460,7 +456,7 @@ void ClientCommandManager::printCommandMessage(const std::string &commandMessage
 
 	if(currentCallFromIngameConsole)
 	{
-		boost::unique_lock<boost::recursive_mutex> un(*CPlayerInterface::pim);
+		boost::mutex::scoped_lock interfaceLock(GH.interfaceMutex);
 		if(LOCPLINT && LOCPLINT->cingconsole)
 		{
 			LOCPLINT->cingconsole->print(commandMessage);
@@ -472,7 +468,7 @@ void ClientCommandManager::giveTurn(const PlayerColor &colorIdentifier)
 {
 	PlayerStartsTurn yt;
 	yt.player = colorIdentifier;
-	yt.queryID = -1;
+	yt.queryID = QueryID::NONE;
 
 	ApplyClientNetPackVisitor visitor(*CSH->client, *CSH->client->gameState());
 	yt.visit(visitor);
@@ -546,9 +542,6 @@ void ClientCommandManager::processCommand(const std::string & message, bool call
 
 	else if (commandName == "set")
 		handleSetCommand(singleWordBuffer);
-
-	else if(commandName == "unlock")
-		handleUnlockCommand(singleWordBuffer);
 
 	else if(commandName == "crash")
 		handleCrashCommand();

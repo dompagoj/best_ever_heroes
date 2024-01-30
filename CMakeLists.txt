@@ -76,9 +76,45 @@ option(ENABLE_MULTI_PROCESS_BUILDS "Enable /MP flag for MSVS solution" ON)
 option(COPY_CONFIG_ON_BUILD "Copies config folder into output directory at building phase" ON)
 option(ENABLE_STATIC_AI_LIBS "Add AI code into VCMI lib directly" ${staticAI})
 
+option(ENABLE_COLORIZED_COMPILER_OUTPUT "Colorize compilation output (Clang/GNU)." ON)
+
+if(ENABLE_COLORIZED_COMPILER_OUTPUT)
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+		add_compile_options(-fcolor-diagnostics)
+	elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+		add_compile_options(-fdiagnostics-color=always)
+	endif()
+endif()
+
 # Used for Snap packages and also useful for debugging
 if(NOT APPLE_IOS AND NOT ANDROID)
 	option(ENABLE_MONOLITHIC_INSTALL "Install everything in single directory on Linux and Mac" OFF)
+endif()
+
+option(ENABLE_CCACHE "Speed up recompilation by caching previous compilations" OFF)
+if(ENABLE_CCACHE)
+	find_program(CCACHE ccache REQUIRED)
+endif()
+
+# The XCode and MSVC builds each require some more configuration further down.
+if(ENABLE_CCACHE)
+	set(CMAKE_C_COMPILER_LAUNCHER "ccache")
+	set(CMAKE_CXX_COMPILER_LAUNCHER "ccache")
+endif()
+
+if(ENABLE_CCACHE AND (CMAKE_GENERATOR STREQUAL "Xcode"))
+	# https://stackoverflow.com/a/36515503/2278742
+	# Set up wrapper scripts
+	configure_file(xcode/launch-c.in   xcode/launch-c)
+	configure_file(xcode/launch-cxx.in xcode/launch-cxx)
+	execute_process(COMMAND chmod a+rx
+											"${CMAKE_BINARY_DIR}/xcode/launch-c"
+											"${CMAKE_BINARY_DIR}/xcode/launch-cxx")
+	# Set Xcode project attributes to route compilation through our scripts
+	set(CMAKE_XCODE_ATTRIBUTE_CC         	"${CMAKE_BINARY_DIR}/xcode/launch-c")
+	set(CMAKE_XCODE_ATTRIBUTE_CXX        	"${CMAKE_BINARY_DIR}/xcode/launch-cxx")
+	set(CMAKE_XCODE_ATTRIBUTE_LD         	"${CMAKE_BINARY_DIR}/xcode/launch-c")
+	set(CMAKE_XCODE_ATTRIBUTE_LDPLUSPLUS 	"${CMAKE_BINARY_DIR}/xcode/launch-cxx")
 endif()
 
 # Allow to pass package name from Travis CI
@@ -233,12 +269,29 @@ endif()
 
 if(MINGW OR MSVC)
 	# Windows Vista or newer for FuzzyLite 6 to compile
-	add_definitions(-D_WIN32_WINNT=0x0600)
+	# Except for conan which already has this definition in its preset
+	if(NOT USING_CONAN)
+		add_definitions(-D_WIN32_WINNT=0x0600)
+	endif()
 
 	#delete lib prefix for dlls (libvcmi -> vcmi)
 	set(CMAKE_SHARED_LIBRARY_PREFIX "")
 
 	if(MSVC)
+		if(ENABLE_CCACHE)
+			# https://github.com/ccache/ccache/discussions/1154#discussioncomment-3611387
+			file(COPY_FILE
+				${CCACHE} ${CMAKE_BINARY_DIR}/cl.exe
+				ONLY_IF_DIFFERENT)
+
+			set(CMAKE_VS_GLOBALS
+				"CLToolExe=cl.exe"
+				"CLToolPath=${CMAKE_BINARY_DIR}"
+				"TrackFileAccess=false"
+				"UseMultiToolTask=true"
+			)
+		endif()
+
 		add_definitions(-DBOOST_ALL_NO_LIB)
 		add_definitions(-DBOOST_ALL_DYN_LINK)
 		set(Boost_USE_STATIC_LIBS OFF)
@@ -676,6 +729,11 @@ endif(WIN32)
 #       Packaging section             #
 #######################################
 
+if(MSVC)
+	SET(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION ${BIN_DIR})
+	Include(InstallRequiredSystemLibraries)
+endif()
+
 set(CPACK_PACKAGE_VERSION_MAJOR ${VCMI_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${VCMI_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${VCMI_VERSION_PATCH})
@@ -713,14 +771,21 @@ if(WIN32)
 	else()
 		set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES")
 	endif()
+
 	if(ENABLE_LAUNCHER)
-		set(CPACK_PACKAGE_EXECUTABLES "VCMI_launcher;VCMI")
-		set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS " CreateShortCut \\\"$DESKTOP\\\\VCMI.lnk\\\" \\\"$INSTDIR\\\\VCMI_launcher.exe\\\"")
+		set(VCMI_MAIN_EXECUTABLE "VCMI_launcher")
 	else()
-		set(CPACK_PACKAGE_EXECUTABLES "VCMI_client;VCMI")
-		set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS " CreateShortCut \\\"$DESKTOP\\\\VCMI.lnk\\\" \\\"$INSTDIR\\\\VCMI_client.exe\\\"")
+		set(VCMI_MAIN_EXECUTABLE "VCMI_client")
 	endif()
-	set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS " Delete \\\"$DESKTOP\\\\VCMI.lnk\\\" ")
+	set(CPACK_PACKAGE_EXECUTABLES "${VCMI_MAIN_EXECUTABLE};VCMI")
+	set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "
+		CreateShortCut \\\"$DESKTOP\\\\VCMI.lnk\\\" \\\"$INSTDIR\\\\${VCMI_MAIN_EXECUTABLE}.exe\\\"
+		ExecShell '' 'netsh' 'advfirewall firewall add rule name=vcmi_server dir=in action=allow program=\\\"$INSTDIR\\\\vcmi_server.exe\\\" enable=yes profile=public,private' SW_HIDE
+	")
+	set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS "
+		Delete \\\"$DESKTOP\\\\VCMI.lnk\\\"
+		ExecShell '' 'netsh' 'advfirewall firewall delete rule name=vcmi_server' SW_HIDE
+	")
 
 	# Strip MinGW CPack target if build configuration without debug info
 	if(MINGW)
@@ -752,6 +817,10 @@ elseif(APPLE_MACOS AND NOT ENABLE_MONOLITHIC_INSTALL)
 	set(CPACK_MONOLITHIC_INSTALL 1)
 	set(CPACK_GENERATOR "DragNDrop")
 	set(CPACK_DMG_BACKGROUND_IMAGE "${CMAKE_SOURCE_DIR}/osx/dmg_background.png")
+	# Workaround for this issue:
+	# CPack Error: Error executing: /usr/bin/hdiutil detach "/Volumes/VCMI"
+	# https://github.com/actions/runner-images/issues/7522#issuecomment-1564467252
+	set(CPACK_COMMAND_HDIUTIL "/usr/bin/sudo /usr/bin/hdiutil")
 	# CMake code for CPACK_DMG_DS_STORE executed before DS_STORE_SETUP_SCRIPT
 	# So we can keep both enabled and this shouldn't hurt
 	# set(CPACK_DMG_DS_STORE "${CMAKE_SOURCE_DIR}/osx/dmg_DS_Store")

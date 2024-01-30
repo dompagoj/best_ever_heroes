@@ -86,7 +86,9 @@ signals:
 	void selectionMade(bool anythingSlected);
 
 private:
-	std::set<int3> area, areaAdd, areaErase;
+	std::set<int3> area;
+	std::set<int3> areaAdd;
+	std::set<int3> areaErase;
 
 	void onSelection();
 };
@@ -120,9 +122,13 @@ public:
 	
 	void setDirty(int x, int y);
 	void setDirty(const CGObjectInstance * object);
+
+	void setLockObject(const CGObjectInstance * object, bool lock);
+	void unlockAll();
 	
 private:
 	std::set<const CGObjectInstance *> objDirty;
+	std::set<const CGObjectInstance *> lockedObjects;
 	std::set<int3> dirty;
 };
 
@@ -180,6 +186,9 @@ public:
 	bool isSelected(const CGObjectInstance *) const;
 	std::set<CGObjectInstance*> getSelection() const;
 	void clear();
+
+	void setLockObject(const CGObjectInstance * object, bool lock);
+	void unlockAll();
 		
 	QPoint shift;
 	CGObjectInstance * newObject;
@@ -191,6 +200,7 @@ signals:
 	
 private:
 	std::set<CGObjectInstance *> selectedObjects;
+	std::set<const CGObjectInstance *> lockedObjects;
 
 	void onSelection();
 };
@@ -219,6 +229,9 @@ public:
 	int viewportHeight() const {return h;}
 	
 private:
-	int x = 0, y = 0, w = 1, h = 1;
+	int x = 0;
+	int y = 0;
+	int w = 1;
+	int h = 1;
 	
 };

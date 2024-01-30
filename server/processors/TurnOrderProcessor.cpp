@@ -9,6 +9,7 @@
  */
 #include "StdInc.h"
 #include "TurnOrderProcessor.h"
+#include "PlayerMessageProcessor.h"
 
 #include "../queries/QueriesProcessor.h"
 #include "../queries/MapQueries.h"
@@ -16,7 +17,6 @@
 #include "../CVCMIServer.h"
 
 #include "../../lib/CPlayerState.h"
-#include "../../lib/NetPacks.h"
 #include "../../lib/pathfinder/CPathfinder.h"
 #include "../../lib/pathfinder/PathfinderOptions.h"
 
@@ -36,9 +36,9 @@ int TurnOrderProcessor::simturnsTurnsMinLimit() const
 	return gameHandler->getStartInfo()->simturnsInfo.requiredTurns;
 }
 
-void TurnOrderProcessor::updateContactStatus()
+std::vector<TurnOrderProcessor::PlayerPair> TurnOrderProcessor::computeContactStatus() const
 {
-	blockedContacts.clear();
+	std::vector<PlayerPair> result;
 
 	assert(actedPlayers.empty());
 	assert(actingPlayers.empty());
@@ -51,9 +51,40 @@ void TurnOrderProcessor::updateContactStatus()
 				continue;
 
 			if (computeCanActSimultaneously(left, right))
-				blockedContacts.push_back({left, right});
+				result.push_back({left, right});
 		}
 	}
+	return result;
+}
+
+void TurnOrderProcessor::updateAndNotifyContactStatus()
+{
+	auto newBlockedContacts = computeContactStatus();
+
+	if (newBlockedContacts.empty())
+	{
+		// Simturns between all players have ended - send single global notification
+		if (!blockedContacts.empty())
+			gameHandler->playerMessages->broadcastSystemMessage("Simultaneous turns have ended");
+	}
+	else
+	{
+		// Simturns between some players have ended - notify each pair
+		for (auto const & contact : blockedContacts)
+		{
+			if (vstd::contains(newBlockedContacts, contact))
+				continue;
+
+			MetaString message;
+			message.appendRawString("Simultaneous turns between players %s and %s have ended"); // FIXME: we should send MetaString itself and localize it on client side
+			message.replaceName(contact.a);
+			message.replaceName(contact.b);
+
+			gameHandler->playerMessages->broadcastSystemMessage(message.toString());
+		}
+	}
+
+	blockedContacts = newBlockedContacts;
 }
 
 bool TurnOrderProcessor::playersInContact(PlayerColor left, PlayerColor right) const
@@ -75,6 +106,8 @@ bool TurnOrderProcessor::playersInContact(PlayerColor left, PlayerColor right) c
 	{
 		CPathsInfo out(mapSize, hero);
 		auto config = std::make_shared<SingleHeroPathfinderConfig>(out, gameHandler->gameState(), hero);
+		config->options.ignoreGuards = true;
+		config->options.turnLimit = 1;
 		CPathfinder pathfinder(gameHandler->gameState(), config);
 		pathfinder.calculatePaths();
 
@@ -89,6 +122,8 @@ bool TurnOrderProcessor::playersInContact(PlayerColor left, PlayerColor right) c
 	{
 		CPathsInfo out(mapSize, hero);
 		auto config = std::make_shared<SingleHeroPathfinderConfig>(out, gameHandler->gameState(), hero);
+		config->options.ignoreGuards = true;
+		config->options.turnLimit = 1;
 		CPathfinder pathfinder(gameHandler->gameState(), config);
 		pathfinder.calculatePaths();
 
@@ -164,7 +199,7 @@ bool TurnOrderProcessor::mustActBefore(PlayerColor left, PlayerColor right) cons
 	if (!leftInfo->isHuman() && rightInfo->isHuman())
 		return false;
 
-	return left < right;
+	return false;
 }
 
 bool TurnOrderProcessor::canStartTurn(PlayerColor which) const
@@ -197,12 +232,15 @@ void TurnOrderProcessor::doStartNewDay()
 	}
 
 	if(!activePlayer)
+	{
 		gameHandler->gameLobby()->setState(EServerState::GAMEPLAY_ENDED);
+		return;
+	}
 
 	std::swap(actedPlayers, awaitingPlayers);
 
 	gameHandler->onNewTurn();
-	updateContactStatus();
+	updateAndNotifyContactStatus();
 	tryStartTurnsForPlayers();
 }
 
@@ -216,7 +254,7 @@ void TurnOrderProcessor::doStartPlayerTurn(PlayerColor which)
 	awaitingPlayers.erase(which);
 	gameHandler->onPlayerTurnStarted(which);
 
-	auto turnQuery = std::make_shared<PlayerStartsTurnQuery>(gameHandler, which);
+	auto turnQuery = std::make_shared<TimerPauseQuery>(gameHandler, which);
 	gameHandler->queries->addQuery(turnQuery);
 
 	PlayerStartsTurn pst;
@@ -264,8 +302,6 @@ void TurnOrderProcessor::onPlayerEndsGame(PlayerColor which)
 
 	if (actingPlayers.empty())
 		doStartNewDay();
-
-	assert(!actingPlayers.empty());
 }
 
 bool TurnOrderProcessor::onPlayerEndsTurn(PlayerColor which)
@@ -301,7 +337,7 @@ bool TurnOrderProcessor::onPlayerEndsTurn(PlayerColor which)
 void TurnOrderProcessor::onGameStarted()
 {
 	if (actingPlayers.empty())
-		updateContactStatus();
+		blockedContacts = computeContactStatus();
 
 	// this may be game load - send notification to players that they can act
 	auto actingPlayersCopy = actingPlayers;

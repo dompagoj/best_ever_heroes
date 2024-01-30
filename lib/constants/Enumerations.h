@@ -11,16 +11,6 @@
 
 VCMI_LIB_NAMESPACE_BEGIN
 
-enum class PrimarySkill : int8_t
-{
-	NONE = -1,
-	ATTACK,
-	DEFENSE,
-	SPELL_POWER,
-	KNOWLEDGE,
-	EXPERIENCE = 4 //for some reason changePrimSkill uses it
-};
-
 enum class EAlignment : int8_t
 {
 	GOOD,
@@ -143,9 +133,9 @@ enum class ETeleportChannelType : int8_t
 	MIXED
 };
 
-namespace SecSkillLevel
+namespace MasteryLevel
 {
-	enum SecSkillLevel
+	enum Type
 	{
 		NONE,
 		BASIC,
@@ -248,6 +238,18 @@ enum class EBattleResult : int8_t
 	NORMAL = 0,
 	ESCAPE = 1,
 	SURRENDER = 2,
+};
+
+enum class ETileVisibility : int8_t // Fog of war change
+{
+	HIDDEN,
+	REVEALED
+};
+
+enum class EArmyFormation : int8_t
+{
+	LOOSE,
+	TIGHT
 };
 
 VCMI_LIB_NAMESPACE_END

@@ -29,8 +29,7 @@
 #include "../../lib/CCreatureHandler.h"
 #include "../../lib/constants/EntityIdentifiers.h"
 #include "../../lib/TextOperations.h"
-
-#include "vstd/DateUtils.h"
+#include "../../lib/Languages.h"
 
 auto HighScoreCalculation::calculate()
 {
@@ -42,7 +41,8 @@ auto HighScoreCalculation::calculate()
 		bool cheater = false;
 	};
 	
-	Result firstResult, summary;
+	Result firstResult;
+	Result summary;
 	const std::array<double, 5> difficultyMultipliers{0.8, 1.0, 1.3, 1.6, 2.0}; 
 	for(auto & param : parameters)
 	{
@@ -215,7 +215,7 @@ void CHighScoreScreen::buttonExitClick()
 }
 
 CHighScoreInputScreen::CHighScoreInputScreen(bool won, HighScoreCalculation calc)
-	: CWindowObject(BORDERED), won(won), calc(calc)
+	: CWindowObject(BORDERED), won(won), calc(calc), videoSoundHandle(-1)
 {
 	addUsedEvents(LCLICK | KEYBOARD);
 
@@ -252,7 +252,7 @@ int CHighScoreInputScreen::addEntry(std::string text) {
 	auto sortFunctor = [](const JsonNode & left, const JsonNode & right)
 	{
 		if(left["points"].Integer() == right["points"].Integer())
-			return left["posFlag"].Integer() > right["posFlag"].Integer();
+			return left["posFlag"].Bool() > right["posFlag"].Bool();
 		return left["points"].Integer() > right["points"].Integer();
 	};
 
@@ -264,7 +264,7 @@ int CHighScoreInputScreen::addEntry(std::string text) {
 		newNode["scenarioName"].String() = calc.calculate().cheater ? CGI->generaltexth->translate("core.genrltxt.260") : calc.parameters[0].scenarioName;
 	newNode["days"].Integer() = calc.calculate().sumDays;
 	newNode["points"].Integer() = calc.calculate().cheater ? 0 : calc.calculate().total;
-	newNode["datetime"].String() = vstd::getFormattedDateTime(std::time(0));
+	newNode["datetime"].String() = TextOperations::getFormattedDateTimeLocal(std::time(nullptr));
 	newNode["posFlag"].Bool() = true;
 
 	baseNode.push_back(newNode);
@@ -295,6 +295,8 @@ void CHighScoreInputScreen::show(Canvas & to)
 		{
 			CCS->videoh->close();
 			video = "HSLOOP.SMK";
+			auto audioData = CCS->videoh->getAudio(VideoPath::builtin(video));
+			videoSoundHandle = CCS->soundh->playSound(audioData);
 			CCS->videoh->open(VideoPath::builtin(video));
 		}
 		else
@@ -307,6 +309,8 @@ void CHighScoreInputScreen::show(Canvas & to)
 
 void CHighScoreInputScreen::activate()
 {
+	auto audioData = CCS->videoh->getAudio(VideoPath::builtin(video));
+	videoSoundHandle = CCS->soundh->playSound(audioData);
 	if(!CCS->videoh->open(VideoPath::builtin(video)))
 	{
 		if(!won)
@@ -320,7 +324,7 @@ void CHighScoreInputScreen::activate()
 void CHighScoreInputScreen::deactivate()
 {
 	CCS->videoh->close();
-	CIntObject::deactivate();
+	CCS->soundh->stopSound(videoSoundHandle);
 }
 
 void CHighScoreInputScreen::clickPressed(const Point & cursorPosition)
@@ -356,7 +360,7 @@ void CHighScoreInputScreen::keyPressed(EShortcut key)
 }
 
 CHighScoreInput::CHighScoreInput(std::string playerName, std::function<void(std::string text)> readyCB)
-	: CWindowObject(0, ImagePath::builtin("HIGHNAME")), ready(readyCB)
+	: CWindowObject(NEEDS_ANIMATED_BACKGROUND, ImagePath::builtin("HIGHNAME")), ready(readyCB)
 {
 	OBJ_CONSTRUCTION_CAPTURING_ALL_NO_DISPOSE;
 

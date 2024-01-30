@@ -49,9 +49,9 @@
 #include "../../lib/filesystem/Filesystem.h"
 #include "../../lib/filesystem/CCompressedStream.h"
 #include "../../lib/mapping/CMapInfo.h"
+#include "../../lib/modding/CModHandler.h"
 #include "../../lib/VCMIDirs.h"
 #include "../../lib/CStopWatch.h"
-#include "../../lib/NetPacksLobby.h"
 #include "../../lib/CThreadHelper.h"
 #include "../../lib/CConfigHandler.h"
 #include "../../lib/GameConstants.h"
@@ -304,8 +304,6 @@ CMainMenu::CMainMenu()
 
 CMainMenu::~CMainMenu()
 {
-	boost::unique_lock<boost::recursive_mutex> lock(*CPlayerInterface::pim);
-
 	if(GH.curInt == this)
 		GH.curInt = nullptr;
 }
@@ -342,6 +340,17 @@ void CMainMenu::update()
 		menu->switchToTab(menu->getActiveTab());
 	}
 
+	static bool warnedAboutModDependencies = false;
+
+	if (!warnedAboutModDependencies)
+	{
+		warnedAboutModDependencies = true;
+		auto errorMessages = CGI->modh->getModLoadErrors();
+
+		if (!errorMessages.empty())
+			CInfoWindow::showInfoDialog(errorMessages, std::vector<std::shared_ptr<CComponent>>(), PlayerColor(1));
+	}
+
 	// Handles mouse and key input
 	GH.handleEvents();
 	GH.windows().simpleRedraw();
@@ -373,12 +382,29 @@ void CMainMenu::openCampaignLobby(std::shared_ptr<CampaignState> campaign)
 
 void CMainMenu::openCampaignScreen(std::string name)
 {
-	if(vstd::contains(CMainMenuConfig::get().getCampaigns().Struct(), name))
+	auto const & config = CMainMenuConfig::get().getCampaigns();
+
+	if(!vstd::contains(config.Struct(), name))
 	{
-		GH.windows().createAndPushWindow<CCampaignScreen>(CMainMenuConfig::get().getCampaigns(), name);
+		logGlobal->error("Unknown campaign set: %s", name);
 		return;
 	}
-	logGlobal->error("Unknown campaign set: %s", name);
+
+	bool campaignsFound = true;
+	for (auto const & entry : config[name]["items"].Vector())
+	{
+		ResourcePath resourceID(entry["file"].String(), EResType::CAMPAIGN);
+		if (!CResourceHandler::get()->existsResource(resourceID))
+			campaignsFound = false;
+	}
+
+	if (!campaignsFound)
+	{
+		CInfoWindow::showInfoDialog(CGI->generaltexth->translate("vcmi.client.errors.missingCampaigns"), std::vector<std::shared_ptr<CComponent>>(), PlayerColor(1));
+		return;
+	}
+
+	GH.windows().createAndPushWindow<CCampaignScreen>(config, name);
 }
 
 void CMainMenu::startTutorial()
@@ -519,9 +545,11 @@ CSimpleJoinScreen::CSimpleJoinScreen(bool host)
 	textTitle = std::make_shared<CTextBox>("", Rect(20, 20, 205, 50), 0, FONT_BIG, ETextAlignment::CENTER, Colors::WHITE);
 	inputAddress = std::make_shared<CTextInput>(Rect(25, 68, 175, 16), background->getSurface());
 	inputPort = std::make_shared<CTextInput>(Rect(25, 115, 175, 16), background->getSurface());
+	buttonOk = std::make_shared<CButton>(Point(26, 142), AnimationPath::builtin("MUBCHCK.DEF"), CGI->generaltexth->zelp[560], std::bind(&CSimpleJoinScreen::connectToServer, this), EShortcut::GLOBAL_ACCEPT);
 	if(host && !settings["session"]["donotstartserver"].Bool())
 	{
 		textTitle->setText(CGI->generaltexth->translate("vcmi.mainMenu.serverConnecting"));
+		buttonOk->block(true);
 		startConnectThread();
 	}
 	else
@@ -530,8 +558,6 @@ CSimpleJoinScreen::CSimpleJoinScreen(bool host)
 		inputAddress->cb += std::bind(&CSimpleJoinScreen::onChange, this, _1);
 		inputPort->cb += std::bind(&CSimpleJoinScreen::onChange, this, _1);
 		inputPort->filters += std::bind(&CTextInput::numberFilter, _1, _2, 0, 65535);
-		buttonOk = std::make_shared<CButton>(Point(26, 142), AnimationPath::builtin("MUBCHCK.DEF"), CGI->generaltexth->zelp[560], std::bind(&CSimpleJoinScreen::connectToServer, this), EShortcut::GLOBAL_ACCEPT);
-
 		inputAddress->giveFocus();
 	}
 	inputAddress->setText(host ? CServerHandler::localhostAddress : CSH->getHostAddress(), true);
@@ -591,6 +617,15 @@ void CSimpleJoinScreen::connectThread(const std::string & addr, ui16 port)
 
 	// async call to prevent thread race
 	GH.dispatchMainThread([this](){
+		if(CSH->state == EClientState::CONNECTION_FAILED)
+		{
+			CInfoWindow::showInfoDialog(CGI->generaltexth->translate("vcmi.mainMenu.serverConnectionFailed"), {});
+
+			textTitle->setText(CGI->generaltexth->translate("vcmi.mainMenu.serverAddressEnter"));
+			GH.startTextInput(inputAddress->pos);
+			buttonOk->block(false);
+		}
+
 		if(GH.windows().isTopWindow(this))
 		{
 			close();
@@ -610,7 +645,8 @@ CLoadingScreen::CLoadingScreen()
 	const auto & conf = CMainMenuConfig::get().getConfig()["loading"];
 	if(conf.isStruct())
 	{
-		const int posx = conf["x"].Integer(), posy = conf["y"].Integer();
+		const int posx = conf["x"].Integer();
+		const int posy = conf["y"].Integer();
 		const int blockSize = conf["size"].Integer();
 		const int blocksAmount = conf["amount"].Integer();
 		

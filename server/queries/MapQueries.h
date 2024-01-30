@@ -10,17 +10,23 @@
 #pragma once
 
 #include "CQuery.h"
+#include "../../lib/networkPacks/PacksForClient.h"
 
-#include "../../lib/NetPacks.h"
+VCMI_LIB_NAMESPACE_BEGIN
+class CGHeroInstance;
+class CGObjectInstance;
+class int3;
+VCMI_LIB_NAMESPACE_END
+
 
 class TurnTimerHandler;
 
-//Created when player starts turn
-//Removed when player accepts a turn
-class PlayerStartsTurnQuery : public CQuery
+//Created when player starts turn or when player puts game on [ause
+//Removed when player accepts a turn or continur play
+class TimerPauseQuery : public CQuery
 {
 public:	
-	PlayerStartsTurnQuery(CGameHandler * owner, PlayerColor player);
+	TimerPauseQuery(CGameHandler * owner, PlayerColor player);
 	
 	bool blocksPack(const CPack *pack) const override;
 	void onAdding(PlayerColor color) override;
@@ -61,7 +67,6 @@ public:
 	virtual void onRemoval(PlayerColor color) override;
 };
 
-
 class CGarrisonDialogQuery : public CDialogQuery //used also for hero exchange dialogs
 {
 public:
@@ -81,6 +86,16 @@ public:
 	CBlockingDialogQuery(CGameHandler * owner, const BlockingDialog &bd);
 
 	virtual void notifyObjectAboutRemoval(const CObjectVisitQuery &objectVisit) const override;
+};
+
+class OpenWindowQuery : public CDialogQuery
+{
+	EOpenWindowMode mode;
+public:
+	OpenWindowQuery(CGameHandler * owner, const CGHeroInstance *hero, EOpenWindowMode mode);
+
+	bool blocksPack(const CPack *pack) const override;
+	void onExposure(QueryPtr topQuery) override;
 };
 
 class CTeleportDialogQuery : public CDialogQuery
